@@ -1,0 +1,97 @@
+# =============================================================================
+# NOVA Nanobody Filter - Full Environment (Conda packages only)
+# 纳米抗体过滤器 - 完整环境（仅 Conda 包）
+#
+# This is the full environment with all conda packages.
+# Pip packages are installed separately using uv (10-100x faster).
+# 这是包含所有 conda 包的完整环境。
+# Pip 包使用 uv 单独安装（比 pip 快 10-100 倍）。
+#
+# Usage / 使用方法:
+#   mamba env create -f environment.yml
+#   # Then install pip packages with uv (see install.sh)
+#   # 然后使用 uv 安装 pip 包（见 install.sh）
+#
+# References / 参考:
+#   - requirements.txt: Pip packages (PyTorch, abnativ, promb, TNP)
+#   - environment-minimal.yml: Minimal conda packages
+#   - install.sh: Installation script (handles both conda and uv)
+# =============================================================================
+name: metanano
+channels:
+  - conda-forge
+  - bioconda
+  - anaconda
+  - defaults
+dependencies:
+  # Python version / Python 版本
+  - python=3.12
+  
+  # Package managers / 包管理器
+  - uv                         # Fast pip replacement (10-100x faster) / 快速 pip 替代品
+  - pip                        # Fallback / 备用
+  
+  # CUDA version / CUDA 版本
+  - cuda=12.8.1
+  - cuda-toolkit=12.8.1
+  - cudnn=9.10.2.21
+  - nccl=2.28.9.1
+
+  # Core bioinformatics tools / 核心生物信息学工具
+  - biopython=1.86
+  - mmseqs2=18.8cc5c           # Sequence clustering / 序列聚类
+  - abnumber=0.3.2             # IMGT numbering / IMGT 编号
+  - anarci=2020.04.23          # Antibody numbering / 抗体编号
+  - datasketch=1.8.0           # MinHash similarity / MinHash 相似度
+  - hmmer=3.4                  # Hidden Markov Models / 隐马尔可夫模型
+  
+  # Structural biology / 结构生物学
+  - dssp=4.5.7
+    
+  # Data processing / 数据处理
+  - pandas=2.1.4
+  - numpy=1.26.4
+  - scipy=1.15.2
+  - pyarrow=19.0.1
+  
+  # Machine Learning / 机器学习
+  - datasets=2.14.4            # Hugging Face datasets / HF 数据集
+  - transformers=4.57.3        # Hugging Face transformers / HF transformers
+  - huggingface_hub=0.36.0     # Hugging Face hub / HF hub
+  - tokenizers=0.22.2          # Fast tokenizers / 快速分词器
+  - safetensors=0.7.0          # Safe tensor storage / 安全张量存储
+  
+  # Web framework / Web 框架
+  - flask=2.3.3
+  - celery=5.5.3               # Task queue / 任务队列
+  - redis-py=7.1.0             # Redis client / Redis 客户端
+  
+  # AWS integration / AWS 集成
+  - boto3=1.42.9
+  - s3transfer=0.16.0
+  
+  # Utilities / 实用工具
+  - pyyaml=6.0.3
+  - tqdm=4.67.1
+  - requests=2.32.5
+  - xlsxwriter=3.2.9
+  - regex=2025.11.3
+  - networkx=3.4.2
+  - sympy=1.14.0
+  - gmpy2=2.2.1
+  
+  # Build tools / 构建工具
+  - setuptools=80.9.0
+  - wheel=0.45.1
+  - pybind11=3.0.1
+  
+  # Compilers / 编译器
+  - gcc=14.3.0
+  - gxx=14.3.0
+  - c-compiler=1.11.0
+  - cxx-compiler=1.11.0
+
+  # Note: Pip packages are installed separately using uv for speed
+  # 注意：Pip 包使用 uv 单独安装以提高速度
+  # See: requirements.txt
+  # 参见：requirements.txt

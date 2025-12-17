@@ -1,0 +1,67 @@
+# =============================================================================
+# NOVA Nanobody Filter - Pip Requirements (Full Environment)
+# 纳米抗体过滤器 - Pip 依赖包（完整环境）
+#
+# These packages are installed using uv for faster installation.
+# 这些包使用 uv 安装以获得更快的安装速度。
+#
+# Usage / 使用方法:
+#   uv pip install -r requirements.txt
+#
+# References / 参考:
+#   - environment.yml: Conda packages (full)
+#   - requirements-minimal.txt: Minimal pip packages
+#   - install.sh: Installation script
+# =============================================================================
+
+# PyTorch index for CUDA 12.8 (extra, keeps PyPI for build deps)
+# PyTorch CUDA 12.8 索引（额外索引，保留 PyPI 用于构建依赖）
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# PyTorch with CUDA 12.8 / 支持 CUDA 12.8 的 PyTorch
+torch
+torchvision
+torchaudio
+
+# wheel
+wheel
+
+# biopython (>=1.81 required for Python 3.12 compatibility)
+# biopython（>=1.81 需要用于 Python 3.12 兼容性）
+biopython==1.86
+
+# AbnatiV v2: Nativeness scoring / 天然性评分
+git+https://gitlab.developers.cam.ac.uk/ch/sormanni/abnativ.git@da4a2e93a8e56a2409a565afaee6b82527ea6876
+
+# openmm for structure modeling / 结构建模
+openmm[cuda12]
+
+# pdbfixer for PDB file processing / PDB 文件处理
+git+https://github.com/openmm/pdbfixer.git@v1.12
+
+# promb: Protein humanness (OASis) / 蛋白质人源性
+promb==1.0.2
+
+# ImmuneBuilder: Deep-Learning models for predicting the structures of immune proteins
+# 免疫蛋白结构预测的深度学习模型
+git+https://github.com/oxpig/ImmuneBuilder.git@0df4e2ad82a1aa60f37ea9dae335d1198159ef78
+
+# TNP: Therapeutic Nanobody Profiler / 治疗性纳米抗体分析器
+git+https://github.com/oxpig/TNP.git@29dcac72f1380e8538e8870f45a699d3c6156162
+
+# FastAPI and async web framework / FastAPI 和异步 Web 框架
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+pydantic>=2.0.0
+
+# Additional dependencies from full environment / 完整环境的额外依赖
+# These are pulled in by the above packages but listed for reproducibility
+# 这些是由上述包引入的，但为了可重现性而列出
+pytorch-lightning
+torchmetrics
+
+# Testing / 测试
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+requests>=2.28.0
+httpx>=0.24.0

@@ -1,0 +1,78 @@
+# =============================================================================
+# NOVA Nanobody Filter - Minimal Environment
+# 纳米抗体过滤器 - 最小环境
+#
+# This is a minimal environment with only essential conda packages.
+# Pip packages are installed separately using uv (10-100x faster than pip).
+# 这是一个仅包含必需 conda 包的最小环境。
+# Pip 包使用 uv 单独安装（比 pip 快 10-100 倍）。
+#
+# Usage / 使用方法:
+#   mamba env create -f environment-minimal.yml
+#   # Then install pip packages with uv (see install.sh)
+#   # 然后使用 uv 安装 pip 包（见 install.sh）
+#
+# References / 参考:
+#   - requirements-pip.txt: Pip packages (abnativ, promb, TNP)
+#   - requirements-pytorch.txt: PyTorch with CUDA 12.8
+#   - install.sh: Installation script (handles both conda and uv)
+# =============================================================================
+name: metanano
+channels:
+  - conda-forge
+  - bioconda
+  - anaconda
+  - defaults
+  - 'nvidia/label/cuda-12.8.1'
+dependencies:
+  # Python version / Python 版本
+  - python=3.12
+  
+  # Package managers / 包管理器
+  - uv                         # Fast pip replacement (10-100x faster) / 快速 pip 替代品
+  - pip                        # Fallback / 备用
+
+  # Building tools / 构建工具
+  - cmake
+  - make
+  - cython 
+  - swig
+  # Autotools for building from source / 用于从源码构建的 Autotools
+  - autoconf
+  - automake
+  - libtool
+  # Boost libraries (required for building DSSP from source)
+  # Boost 库（从源码构建 DSSP 所需）
+  - boost
+  - boost-cpp
+
+  # CUDA version / CUDA 版本
+  - cuda=12.8.1
+  - cuda-toolkit=12.8.1
+
+  # Core bioinformatics tools / 核心生物信息学工具
+  - mmseqs2                    # Sequence clustering / 序列聚类
+  - abnumber                   # IMGT numbering / IMGT 编号
+  - datasketch                 # MinHash similarity / MinHash 相似度
+  - hmmer                      # Hidden Markov Models / 隐马尔可夫模型
+      
+  # Data processing / 数据处理
+  - pandas
+  - numpy
+  - scipy
+  - scikit-learn
+  
+  # Web framework / Web 框架
+  - flask
+  
+  # Utilities / 实用工具
+  - pyyaml
+  - tqdm
+  - requests
+
+  # Note: Pip packages are installed separately using uv for speed
+  # 注意：Pip 包使用 uv 单独安装以提高速度
+  # See: requirements-pip.txt, requirements-pytorch.txt
+  # 参见：requirements-pip.txt, requirements-pytorch.txt
+
+
