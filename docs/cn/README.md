@@ -2,6 +2,14 @@
 
 使用 Python 实现的模块化纳米抗体挑战赛提交系统的实施计划。目标是构建一个干净、模块化的应用程序，能够良好扩展并保持逻辑分离。
 
+## 相关文档
+
+- [搜索快速上手](SEARCH_QUICKSTART.md) - 索引、提交任务、轮询结果的一页式指南
+- [真实数据搜索复现](SEARCH_REAL_DATA_REPRO.md) - 用公开 VHH 数据复现端到端搜索测试
+- [成对比对方案说明](PAIRWISE_ALIGNMENT_NOTES.md) - 当前后端与更快选项对比
+- [English Search Quickstart](../en/SEARCH_QUICKSTART.md) - Search quickstart in English
+- [排序说明（12.1）](#121-搜索能力概览) - 搜索结果并列时的稳定排序与截断规则
+
 ---
 
 ## **1. 功能**
@@ -930,3 +938,117 @@ async def main():
 
 asyncio.run(main())
 ```
+
+---
+
+## **12. 序列搜索使用指南**
+
+本项目已新增异步序列搜索子系统，用于在内存索引中快速查找相似纳米抗体序列。
+
+### **12.1 搜索能力概览**
+
+- **两阶段粗过滤**：共享 k-mer 数量 + Jaccard 阈值筛选候选。
+- **精细比对**：优先使用 `parasail`（SIMD 加速），不可用时回退到 BioPython。
+- **异步任务模型**：提交搜索请求立即返回 `job_id`，通过轮询查询状态与结果。
+- **内存索引**：支持通过 API 动态索引序列（v1 不落盘）。
+- **确定性排序**：最终结果按 `identity` 降序排序；`identity` 相同按 `target_id` 升序稳定打破并列。
+- **粗过滤并列处理**：Jaccard 相同的候选按索引目标序列 ID（`target_id`）升序确定顺序，再执行 `max_candidates` 截断。
+
+### **12.2 搜索模块架构**
+
+1. `IndexManager`：维护序列记录和 k-mer 倒排索引。
+2. `SearchEngine`：编排粗过滤、精细比对、CDR 相似度计算。
+3. `JobManager`：管理任务状态（`pending/running/completed/failed`）和 TTL 清理。
+4. `SearchService`：异步提交与并发控制（`asyncio.Semaphore`）。
+5. `search_routes`：提供 `/search/*` REST API。
+
+### **12.3 搜索 API 路由**
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/search` | POST | 提交异步搜索任务（返回 `job_id`，HTTP 202） |
+| `/search/{job_id}` | GET | 获取任务状态与结果 |
+| `/search/index` | POST | 向搜索索引添加序列（HTTP 201） |
+| `/search/index/stats` | GET | 获取当前索引序列数量 |
+
+### **12.4 快速调用示例（curl）**
+
+1）索引参考序列：
+
+```bash
+curl -X POST http://localhost:5000/search/index \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "db_001",
+    "sequence": "QVQLVQSGVEVKKPGASVKVSCKASGYTFTNYYMYWVRQAPGQGLEWMGGINPSNGGTNFNEKFKNRVTLTTDSSTTTAYMELKSLQFDDTAVYYCARRDYRFDMGFDYWGQGTTVTVSS"
+  }'
+```
+
+2）提交搜索任务：
+
+```bash
+curl -X POST http://localhost:5000/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sequences": [
+      "EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCAKDLGWSFDYWGQGTLVTVSS"
+    ],
+    "include_alignment": true,
+    "coarse_min_shared": 3,
+    "coarse_jaccard": 0.3
+  }'
+```
+
+预期返回：
+
+```json
+{
+  "job_id": "<uuid>"
+}
+```
+
+3）轮询任务结果：
+
+```bash
+curl http://localhost:5000/search/<job_id>
+```
+
+### **12.5 Python 调用示例**
+
+```python
+import asyncio
+from metanano.config import SearchConfig
+from metanano.services.search_service import SearchService
+from metanano.utils.kmer import generate_kmers
+
+
+async def main() -> None:
+    service = SearchService(SearchConfig())
+
+    ref = "QVQLVQSGVEVKKPGASVKVSCKASGYTFTNYYMYWVRQAPGQGLEWMGGINPSNGGTNFNEKFKNRVTLTTDSSTTTAYMELKSLQFDDTAVYYCARRDYRFDMGFDYWGQGTTVTVSS"
+    service.index_sequence("db_001", ref, {"CDR3": "RDYRFDMGFDY"}, generate_kmers(ref, k=5))
+
+    job_id = await service.submit_search([ref])
+    while True:
+        job = await service.get_job_status(job_id)
+        if job and job.status.value in {"completed", "failed"}:
+            print(job.status.value, job.result, job.error)
+            break
+        await asyncio.sleep(0.1)
+
+
+asyncio.run(main())
+```
+
+### **12.6 输入校验规则**
+
+- 序列会自动转换为大写并移除空白。
+- 仅允许氨基酸字符：`ACDEFGHIKLMNPQRSTVWY`。
+- 搜索/索引接口的序列长度范围：`10-500`。
+
+### **12.7 运维与故障排查**
+
+- `422 Unprocessable Entity`：通常为字符非法或长度越界。
+- `/search/{job_id}` 返回 `404`：任务不存在或已过期。
+- 结果返回较慢：可关闭 `include_alignment` 或提高粗过滤阈值。
+- 索引为内存态：服务重启后索引会清空。

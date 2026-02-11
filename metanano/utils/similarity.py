@@ -16,9 +16,49 @@ Consumers / 调用方:
     - metanano/filters/diversity.py
 """
 
-from typing import Optional
+from typing import Optional, Set
 
 from metanano.utils.kmer import generate_kmers, generate_kmers_with_counts
+
+
+def compute_kmer_similarity_precomputed(
+    kmers1: Set[str],
+    kmers2: Set[str],
+) -> float:
+    """
+    Compute Jaccard similarity from pre-generated k-mer sets (avoids regeneration).
+    从预生成的 k-mer 集合计算 Jaccard 相似度（避免重新生成）。
+
+    Args / 参数:
+        kmers1 (Set[str]): First set of k-mers.
+            第一个 k-mer 集合。
+        kmers2 (Set[str]): Second set of k-mers.
+            第二个 k-mer 集合。
+
+    Returns / 返回:
+        float: Jaccard similarity (0-1).
+            Jaccard 相似度（0-1）。
+
+    Example / 示例:
+        >>> from metanano.utils.kmer import generate_kmers
+        >>> kmers_a = generate_kmers("EVQLVES", 3)
+        >>> kmers_b = generate_kmers("QVQLVES", 3)
+        >>> compute_kmer_similarity_precomputed(kmers_a, kmers_b)
+        0.8
+
+    Consumers / 调用方:
+        - metanano/search/index_manager.py: IndexManager.coarse_filter
+    """
+    if not kmers1 or not kmers2:
+        return 0.0
+
+    intersection = len(kmers1 & kmers2)
+    union = len(kmers1 | kmers2)
+
+    if union == 0:
+        return 0.0
+
+    return intersection / union
 
 
 def compute_kmer_similarity(

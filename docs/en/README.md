@@ -2,6 +2,16 @@
 
 Implementation plan for a modular nanobody challenge submission system in Python. The goal is to build a clean, modular application that can scale well while keeping things logically separated.
 
+## Related Docs
+
+- [Search Quickstart](SEARCH_QUICKSTART.md) - One-page guide for indexing, submitting, and polling search jobs
+- [中文搜索快速上手](../cn/SEARCH_QUICKSTART.md) - Chinese search quickstart
+
+### Search Ordering Note
+
+- Search result ranking is deterministic: primary sort is alignment identity (descending), tie-break is `target_id` (ascending).
+- Coarse-filter candidate ties at equal Jaccard are deterministically resolved by indexed target sequence ID (`target_id`) before `max_candidates` truncation.
+
 ---
 
 ## **1. Functionalities**

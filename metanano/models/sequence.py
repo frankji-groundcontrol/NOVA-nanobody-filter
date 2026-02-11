@@ -17,7 +17,7 @@ Consumers / 调用方:
 """
 
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -47,6 +47,21 @@ class Sequence(BaseModel):
         description="Amino acid sequence of the nanobody (VHH). "
         "Must be 50-200 characters, uppercase letters only. / "
         "纳米抗体（VHH）的氨基酸序列。必须为50-200个字符，仅大写字母。",
+    )
+    id: Optional[str] = Field(
+        default=None,
+        description="Optional sequence identifier for tracking and search. / "
+        "用于跟踪和搜索的可选序列标识符。",
+    )
+    cdrs: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Optional CDR regions mapping (e.g., {'CDR1': 'GFTFS', 'CDR2': '...', 'CDR3': '...'}). / "
+        "可选的 CDR 区域映射（例如，{'CDR1': 'GFTFS', 'CDR2': '...', 'CDR3': '...'}）。",
+    )
+    kmers: Optional[Set[str]] = Field(
+        default=None,
+        description="Optional k-mer set for coarse filtering and similarity search. / "
+        "用于粗过滤和相似性搜索的可选 k-mer 集合。",
     )
 
     @field_validator("sequence")

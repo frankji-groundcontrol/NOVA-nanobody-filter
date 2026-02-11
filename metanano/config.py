@@ -520,6 +520,68 @@ class AsyncConfig(BaseModel):
     )
 
 
+class CoarseFilterConfig(BaseModel):
+    """
+    Coarse filter configuration for sequence search.
+    序列搜索的粗过滤配置。
+
+    Consumers / 调用方:
+        - metanano/search/coarse_filter.py (future)
+    """
+
+    min_shared_kmers: int = Field(
+        default=3,
+        ge=1,
+        description="Minimum number of shared k-mers to consider sequences similar. / "
+        "认为序列相似所需的最小共享 k-mer 数量。",
+    )
+    jaccard_threshold: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Minimum Jaccard similarity threshold for coarse filtering. / "
+        "粗过滤的最小 Jaccard 相似度阈值。",
+    )
+
+
+class FineAlignmentConfig(BaseModel):
+    """
+    Fine alignment configuration for sequence search.
+    序列搜索的精细对齐配置。
+
+    Consumers / 调用方:
+        - metanano/search/fine_alignment.py (future)
+    """
+
+    gap_open: int = Field(
+        default=10,
+        ge=0,
+        description="Gap opening penalty for sequence alignment. / "
+        "序列对齐的间隙开放惩罚。",
+    )
+
+
+class SearchConfig(BaseModel):
+    """
+    Sequence search configuration.
+    序列搜索配置。
+
+    Consumers / 调用方:
+        - metanano/search/*.py (future)
+    """
+
+    coarse_filter: CoarseFilterConfig = Field(
+        default_factory=CoarseFilterConfig,
+        description="Coarse filter settings for fast candidate selection. / "
+        "用于快速候选选择的粗过滤设置。",
+    )
+    fine_alignment: FineAlignmentConfig = Field(
+        default_factory=FineAlignmentConfig,
+        description="Fine alignment settings for precise similarity scoring. / "
+        "用于精确相似度评分的精细对齐设置。",
+    )
+
+
 class DevelopabilityConfig(BaseModel):
     """
     Developability filter configuration (Red Region - July 2025).
@@ -600,6 +662,10 @@ class Config(BaseModel):
     developability: DevelopabilityConfig = Field(
         default_factory=DevelopabilityConfig,
         description="Developability filter configuration. / 可开发性过滤器配置。",
+    )
+    search: SearchConfig = Field(
+        default_factory=SearchConfig,
+        description="Sequence search configuration. / 序列搜索配置。",
     )
 
     class Config:

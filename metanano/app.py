@@ -30,6 +30,7 @@ from metanano.routes import (
     nativeness_router,
     developability_router,
     service_router,
+    search_router,
 )
 from metanano.services.async_manager import get_service_manager
 
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(nativeness_router)
     app.include_router(developability_router)
     app.include_router(service_router)
+    app.include_router(search_router)
 
     @app.on_event("startup")
     async def startup_event():
@@ -118,6 +120,5 @@ if __name__ == "__main__":
         port=5000,
         reload=True,
     )
-
 
 

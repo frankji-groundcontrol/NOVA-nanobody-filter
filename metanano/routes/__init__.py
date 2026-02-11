@@ -31,6 +31,7 @@ from metanano.routes.diversity_routes import router as diversity_router
 from metanano.routes.nativeness_routes import router as nativeness_router
 from metanano.routes.developability_routes import router as developability_router
 from metanano.routes.service_routes import router as service_router
+from metanano.routes.search_routes import router as search_router
 
 __all__ = [
     "submission_router",
@@ -40,7 +41,7 @@ __all__ = [
     "nativeness_router",
     "developability_router",
     "service_router",
+    "search_router",
 ]
-
 
 
