@@ -22,10 +22,40 @@ Consumers / 调用方:
 
 import threading
 from dataclasses import dataclass, field
+from importlib import import_module
 from typing import Dict, List, Optional, Set
+from typing import Protocol, cast
 
 from metanano.config import SearchConfig
-from metanano.utils.similarity import compute_kmer_similarity_precomputed
+from metanano.utils.similarity import generate_minhash_signature
+
+
+class MinHashLike(Protocol):
+    num_perm: int
+
+    def update(self, value: bytes) -> None: ...
+
+    def jaccard(self, other: "MinHashLike") -> float: ...
+
+
+class MinHashFactory(Protocol):
+    def __call__(self, *, num_perm: int) -> MinHashLike: ...
+
+
+class MinHashLSHLike(Protocol):
+    def insert(self, key: str, minhash: MinHashLike) -> None: ...
+
+    def query(self, minhash: MinHashLike) -> List[str]: ...
+
+
+class MinHashLSHFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        threshold: float,
+        num_perm: int,
+        weights: tuple[float, float],
+    ) -> MinHashLSHLike: ...
 
 
 @dataclass
@@ -41,8 +71,8 @@ class SequenceRecord:
             完整氨基酸序列。
         cdrs (Optional[Dict[str, str]]): CDR regions (may be None if extraction failed).
             CDR 区域（如果提取失败则为 None）。
-        kmers (Set[str]): Pre-generated k-mer set for this sequence.
-            此序列的预生成 k-mer 集合。
+        kmer_count (int): Number of unique k-mers for this sequence.
+            此序列的唯一 k-mer 数量。
 
     Consumers / 调用方:
         - metanano/search/index_manager.py: IndexManager
@@ -51,7 +81,7 @@ class SequenceRecord:
     id: str
     sequence: str
     cdrs: Optional[Dict[str, str]]
-    kmers: Set[str] = field(default_factory=set)
+    kmer_count: int = field(default=0)
 
 
 class IndexManager:
@@ -96,8 +126,12 @@ class IndexManager:
                 粗过滤相关的搜索配置。
         """
         self._config = config
-        self._inverted_index: Dict[str, Set[int]] = {}
+        self._inverted_index: Dict[int, List[int]] = {}
         self._records: List[SequenceRecord] = []
+        self._seq_to_ids: Dict[str, Set[str]] = {}
+        self._id_to_idx: Dict[str, int] = {}
+        self._lsh_index: Optional[MinHashLSHLike] = None
+        self._minhash_signatures: Dict[int, MinHashLike] = {}
         self._lock = threading.Lock()
 
     def add_sequence(
@@ -123,18 +157,36 @@ class IndexManager:
         """
         with self._lock:
             idx = len(self._records)
+            hashed_kmers = frozenset(hash(kmer) for kmer in kmers)
             record = SequenceRecord(
                 id=seq_id,
                 sequence=sequence,
                 cdrs=cdrs,
-                kmers=kmers,
+                kmer_count=len(hashed_kmers),
             )
             self._records.append(record)
+            self._id_to_idx[seq_id] = idx
+            if sequence not in self._seq_to_ids:
+                self._seq_to_ids[sequence] = set()
+            self._seq_to_ids[sequence].add(seq_id)
 
-            for kmer in kmers:
+            if self._config.coarse_filter.retrieval_strategy == "lsh":
+                signature = generate_minhash_signature(
+                    sequence,
+                    k=self._config.k,
+                    num_perm=self._config.lsh.num_perm,
+                )
+                if signature is None:
+                    raise RuntimeError("datasketch is required for retrieval_strategy='lsh'")
+                if self._lsh_index is None:
+                    self._lsh_index = self._create_lsh_index()
+                self._lsh_index.insert(seq_id, signature)
+                self._minhash_signatures[idx] = signature
+
+            for kmer in hashed_kmers:
                 if kmer not in self._inverted_index:
-                    self._inverted_index[kmer] = set()
-                self._inverted_index[kmer].add(idx)
+                    self._inverted_index[kmer] = []
+                self._inverted_index[kmer].append(idx)
 
     def coarse_filter(
         self,
@@ -176,9 +228,11 @@ class IndexManager:
 
         # Stage 1: Count shared k-mers per candidate
         # 阶段 1：统计每个候选的共享 k-mer 数量
+        query_hashes = frozenset(hash(kmer) for kmer in query_kmers)
+        query_count = len(query_hashes)
         candidate_counts: Dict[int, int] = {}
         with self._lock:
-            for kmer in query_kmers:
+            for kmer in query_hashes:
                 if kmer in self._inverted_index:
                     for idx in self._inverted_index[kmer]:
                         candidate_counts[idx] = candidate_counts.get(idx, 0) + 1
@@ -195,9 +249,9 @@ class IndexManager:
             # 阶段 2：对幸存者计算 Jaccard
             scored: List[tuple[int, float]] = []
             for idx in stage1_survivors:
-                jaccard = compute_kmer_similarity_precomputed(
-                    query_kmers, self._records[idx].kmers
-                )
+                intersection = candidate_counts[idx]
+                union = query_count + self._records[idx].kmer_count - intersection
+                jaccard = 0.0 if union <= 0 else intersection / union
                 if jaccard >= jaccard_threshold:
                     scored.append((idx, jaccard))
 
@@ -205,6 +259,91 @@ class IndexManager:
         # 阶段 3：按 Jaccard 降序排序，限制在 max_candidates
         scored.sort(key=lambda x: (-x[1], self._records[x[0]].id))
         return [idx for idx, _ in scored[:max_candidates]]
+
+    def lsh_query(
+        self,
+        query_kmers: Set[str],
+        max_candidates: int,
+        exclude_ids: Optional[Set[str]] = None,
+    ) -> List[int]:
+        if exclude_ids is None:
+            exclude_ids = set()
+        if not query_kmers or max_candidates <= 0:
+            return []
+
+        with self._lock:
+            if not self._records:
+                return []
+
+            if self._lsh_index is None or len(self._minhash_signatures) != len(self._records):
+                self._build_lsh_index_locked()
+
+            minhash_factory = self._get_minhash_factory()
+            query_signature = minhash_factory(num_perm=self._config.lsh.num_perm)
+            for kmer in query_kmers:
+                query_signature.update(kmer.encode("utf-8"))
+
+            assert self._lsh_index is not None
+            candidate_ids = self._lsh_index.query(query_signature)
+
+            scored: List[tuple[int, float]] = []
+            for seq_id in candidate_ids:
+                if seq_id in exclude_ids:
+                    continue
+                idx = self._id_to_idx.get(seq_id)
+                if idx is None:
+                    continue
+                signature = self._minhash_signatures.get(idx)
+                if signature is None:
+                    continue
+                scored.append((idx, query_signature.jaccard(signature)))
+
+        scored.sort(key=lambda item: (-item[1], self._records[item[0]].id))
+        return [idx for idx, _ in scored[:max_candidates]]
+
+    def build_lsh_index(self) -> None:
+        with self._lock:
+            self._build_lsh_index_locked()
+
+    def _build_lsh_index_locked(self) -> None:
+        lsh_index = self._create_lsh_index()
+        signatures: Dict[int, MinHashLike] = {}
+
+        for idx, record in enumerate(self._records):
+            signature = generate_minhash_signature(
+                record.sequence,
+                k=self._config.k,
+                num_perm=self._config.lsh.num_perm,
+            )
+            if signature is None:
+                raise RuntimeError("datasketch is required for MinHashLSH retrieval")
+            lsh_index.insert(record.id, signature)
+            signatures[idx] = signature
+
+        self._lsh_index = lsh_index
+        self._minhash_signatures = signatures
+
+    def _create_lsh_index(self) -> MinHashLSHLike:
+        minhash_lsh_factory = self._get_minhash_lsh_factory()
+        return minhash_lsh_factory(
+            threshold=self._config.lsh.lsh_threshold,
+            num_perm=self._config.lsh.num_perm,
+            weights=self._config.lsh.weights,
+        )
+
+    def _get_minhash_factory(self) -> MinHashFactory:
+        try:
+            datasketch = import_module("datasketch")
+        except ImportError as exc:
+            raise RuntimeError("datasketch is required for MinHashLSH retrieval") from exc
+        return cast(MinHashFactory, getattr(datasketch, "MinHash"))
+
+    def _get_minhash_lsh_factory(self) -> MinHashLSHFactory:
+        try:
+            datasketch = import_module("datasketch")
+        except ImportError as exc:
+            raise RuntimeError("datasketch is required for MinHashLSH retrieval") from exc
+        return cast(MinHashLSHFactory, getattr(datasketch, "MinHashLSH"))
 
     def get_record(self, index: int) -> SequenceRecord:
         """
@@ -220,6 +359,17 @@ class IndexManager:
                 存储的序列记录。
         """
         return self._records[index]
+
+    def get_ids_for_sequence(self, sequence: str) -> Set[str]:
+        with self._lock:
+            return set(self._seq_to_ids.get(sequence, set()))
+
+    def get_record_by_id(self, seq_id: str) -> Optional[SequenceRecord]:
+        with self._lock:
+            idx = self._id_to_idx.get(seq_id)
+            if idx is None:
+                return None
+            return self._records[idx]
 
     def size(self) -> int:
         """
@@ -240,3 +390,7 @@ class IndexManager:
         with self._lock:
             self._inverted_index.clear()
             self._records.clear()
+            self._seq_to_ids.clear()
+            self._id_to_idx.clear()
+            self._lsh_index = None
+            self._minhash_signatures.clear()

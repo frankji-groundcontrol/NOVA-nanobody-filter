@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Set
 
 import pytest
 
-from metanano.config import SearchConfig
+from metanano.config import CoarseFilterConfig, SearchConfig
 from metanano.search.index_manager import IndexManager, SequenceRecord
 from metanano.utils.kmer import generate_kmers
 from metanano.utils.similarity import compute_kmer_similarity
@@ -87,7 +87,7 @@ class TestIndexManagerBasics:
         assert record.id == "query_0"
         assert record.sequence == query_sequence
         assert record.cdrs == cdrs
-        assert record.kmers == kmers
+        assert record.kmer_count == len(kmers)
 
     def test_cdr_extraction_failure_handled(
         self,
@@ -103,7 +103,45 @@ class TestIndexManagerBasics:
 
         record = index_manager.get_record(0)
         assert record.cdrs is None
-        assert record.kmers == kmers
+        assert record.kmer_count == len(kmers)
+
+    def test_get_ids_for_sequence_returns_all_ids(
+        self,
+        index_manager: IndexManager,
+        query_sequence: str,
+    ) -> None:
+        kmers = generate_kmers(query_sequence, 5)
+        index_manager.add_sequence("seq_a", query_sequence, None, kmers)
+        index_manager.add_sequence("seq_b", query_sequence, None, kmers)
+
+        found = index_manager.get_ids_for_sequence(query_sequence)
+        assert found == {"seq_a", "seq_b"}
+        assert index_manager.get_ids_for_sequence("THIS_SEQUENCE_DOES_NOT_EXIST") == set()
+
+    def test_get_record_by_id_returns_record_or_none(
+        self,
+        index_manager: IndexManager,
+        query_sequence: str,
+    ) -> None:
+        kmers = generate_kmers(query_sequence, 5)
+        index_manager.add_sequence("seq_0", query_sequence, None, kmers)
+
+        record = index_manager.get_record_by_id("seq_0")
+        assert record is not None
+        assert record.id == "seq_0"
+        assert record.sequence == query_sequence
+        assert index_manager.get_record_by_id("missing") is None
+
+    def test_kmers_stored_as_hashed_frozenset(
+        self,
+        index_manager: IndexManager,
+        query_sequence: str,
+    ) -> None:
+        kmers = generate_kmers(query_sequence, 5)
+        index_manager.add_sequence("seq_hashed", query_sequence, None, kmers)
+
+        record = index_manager.get_record(0)
+        assert record.kmer_count == len(kmers)
 
 
 class TestCoarseFilter:
@@ -287,6 +325,33 @@ class TestCoarseFilter:
 
         assert len(candidates) == 1
         assert mgr.get_record(candidates[0]).id == "a_seq"
+
+    def test_lsh_methods_exist(self, index_manager: IndexManager) -> None:
+        assert hasattr(index_manager, "lsh_query")
+        assert hasattr(index_manager, "build_lsh_index")
+
+    def test_lsh_query_exclude_ids_and_tie_breaking(self) -> None:
+        pytest.importorskip("datasketch")
+
+        config = SearchConfig(coarse_filter=CoarseFilterConfig(retrieval_strategy="lsh"))
+        mgr = IndexManager(config)
+
+        seq = "QVQLVQSGVEVKKPGASVKVSCKASGYTFTNYYMYWVRQAPGQGLEWMGGINPSNGGTNFNEKFKN"
+        seq_variant = "QVQLVQSGVEVKKPGASVKVSCKASGYTFTNYYMYWVRQAPGQGLEWMGGINPSNGGTNFNEKFKS"
+        kmers = generate_kmers(seq, 5)
+
+        mgr.add_sequence("z_seq", seq, None, kmers)
+        mgr.add_sequence("a_seq", seq, None, kmers)
+        mgr.add_sequence("b_seq", seq_variant, None, generate_kmers(seq_variant, 5))
+
+        candidates = mgr.lsh_query(query_kmers=kmers, max_candidates=3)
+        candidate_ids = [mgr.get_record(idx).id for idx in candidates]
+
+        assert candidate_ids[:2] == ["a_seq", "z_seq"]
+
+        filtered = mgr.lsh_query(query_kmers=kmers, max_candidates=3, exclude_ids={"a_seq"})
+        filtered_ids = [mgr.get_record(idx).id for idx in filtered]
+        assert "a_seq" not in filtered_ids
 
 
 class TestThreadSafety:
