@@ -7,6 +7,7 @@ Implementation plan for a modular nanobody challenge submission system in Python
 - [Search Quickstart](SEARCH_QUICKSTART.md) - One-page guide for indexing, submitting, and polling search jobs
 - [中文搜索快速上手](../cn/SEARCH_QUICKSTART.md) - Chinese search quickstart
 - [Search Performance Benchmarks](#12-search-performance-benchmarks) - Tier 1 and Tier 2 search benchmark results on real data
+- [Search Architecture](SEARCH_ARCHITECTURE.md) - How sequence search works, all parameters, and nanobody duplicate detection tuning
 
 ### Search Ordering Note
 

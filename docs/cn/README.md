@@ -10,6 +10,7 @@
 - [English Search Quickstart](../en/SEARCH_QUICKSTART.md) - Search quickstart in English
 - [排序说明（12.1）](#121-搜索能力概览) - 搜索结果并列时的稳定排序与截断规则
 - [搜索性能基准测试](#12-搜索性能基准测试) - 真实数据上的 Tier 1 和 Tier 2 搜索基准测试结果
+- [搜索架构](SEARCH_ARCHITECTURE.md) - 序列搜索原理、全部参数及纳米抗体重复检测调参指南
 
 ---
 
