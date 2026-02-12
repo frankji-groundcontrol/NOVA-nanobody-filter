@@ -99,6 +99,145 @@ print(f"Developability: {result.developability_passed}")
 | `/developability/analyze` | POST | Developability profiling |
 | `/services/gpu` | GET | GPU scheduler status |
 
+## Sequence Search Guide
+
+The project now includes an async sequence-search subsystem designed for fast retrieval of similar nanobody candidates.
+
+### What it does
+
+- Uses a **two-stage coarse filter** (shared k-mers + Jaccard) to quickly narrow candidates.
+- Runs **fine alignment** with `parasail` (SIMD) and BioPython fallback.
+- Supports **async job execution**: submit once, poll by `job_id`.
+- Exposes indexing and search routes through `/search/*`.
+
+### Search architecture (high level)
+
+1. **IndexManager** stores in-memory sequence records and k-mer inverted index.
+2. **SearchEngine** orchestrates coarse filter + fine alignment + CDR comparison.
+3. **JobManager** tracks async lifecycle: `pending -> running -> completed/failed`.
+4. **SearchService** runs searches in background tasks with semaphore concurrency control.
+5. **Search routes** expose HTTP endpoints for indexing, submit, and status polling.
+
+### Search API endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/search` | POST | Submit async search job, returns `job_id` (HTTP 202) |
+| `/search/{job_id}` | GET | Get job status and result payload |
+| `/search/index` | POST | Index a sequence into in-memory search database (HTTP 201) |
+| `/search/index/stats` | GET | Return current indexed sequence count |
+
+### Quick API walkthrough
+
+1) **Index a reference sequence**
+
+```bash
+curl -X POST http://localhost:5000/search/index \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "db_001",
+    "sequence": "QVQLVQSGVEVKKPGASVKVSCKASGYTFTNYYMYWVRQAPGQGLEWMGGINPSNGGTNFNEKFKNRVTLTTDSSTTTAYMELKSLQFDDTAVYYCARRDYRFDMGFDYWGQGTTVTVSS"
+  }'
+```
+
+2) **Submit a search job**
+
+```bash
+curl -X POST http://localhost:5000/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sequences": [
+      "EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCAKDLGWSFDYWGQGTLVTVSS"
+    ],
+    "include_alignment": true,
+    "coarse_min_shared": 3,
+    "coarse_jaccard": 0.3
+  }'
+```
+
+Expected response:
+
+```json
+{
+  "job_id": "<uuid>"
+}
+```
+
+3) **Poll for completion**
+
+```bash
+curl http://localhost:5000/search/<job_id>
+```
+
+Example status payload (completed):
+
+```json
+{
+  "job_id": "<uuid>",
+  "status": "completed",
+  "created_at": 1739170000.123,
+  "completed_at": 1739170000.845,
+  "result": [
+    {
+      "query_sequence": "...",
+      "matches": [
+        {
+          "target_id": "db_001",
+          "identity": 0.93,
+          "tier": "high"
+        }
+      ]
+    }
+  ],
+  "error": null
+}
+```
+
+### Python usage example
+
+```python
+import asyncio
+from metanano.config import SearchConfig
+from metanano.services.search_service import SearchService
+from metanano.utils.kmer import generate_kmers
+
+
+async def main() -> None:
+    service = SearchService(SearchConfig())
+
+    ref = "QVQLVQSGVEVKKPGASVKVSCKASGYTFTNYYMYWVRQAPGQGLEWMGGINPSNGGTNFNEKFKNRVTLTTDSSTTTAYMELKSLQFDDTAVYYCARRDYRFDMGFDYWGQGTTVTVSS"
+    service.index_sequence("db_001", ref, {"CDR3": "RDYRFDMGFDY"}, generate_kmers(ref, k=5))
+
+    job_id = await service.submit_search([ref])
+    while True:
+        job = await service.get_job_status(job_id)
+        if job and job.status.value in {"completed", "failed"}:
+            print(job.status.value, job.result, job.error)
+            break
+        await asyncio.sleep(0.1)
+
+
+asyncio.run(main())
+```
+
+### Input validation rules (search routes)
+
+- Sequences are uppercased and whitespace-normalized.
+- Valid amino acids only: `ACDEFGHIKLMNPQRSTVWY`.
+- Accepted length range on search/index endpoints: `10-500`.
+
+### Operational notes
+
+- Search index is **in-memory only** (no disk persistence in v1).
+- Restarting the service clears indexed sequences.
+- Use `/search/index/stats` to monitor current index size.
+
+### Troubleshooting
+
+- `422 Unprocessable Entity`: invalid sequence characters or length.
+- `404` on `/search/{job_id}`: job expired/not found.
+- Slow search results: reduce `include_alignment`, tighten coarse filter thresholds.
+
 ## Filter Thresholds
 
 ### Diversity (MMseqs2 + CDR)
@@ -134,7 +273,11 @@ print(f"Developability: {result.developability_passed}")
 ## Documentation
 
 - [English Documentation](docs/en/README.md) - Full technical documentation
+- [Search Quickstart](docs/en/SEARCH_QUICKSTART.md) - Fast start for indexing and async search
+- [Real-Data Search Repro](docs/en/SEARCH_REAL_DATA_REPRO.md) - Reproduce E2E search test with public VHH dataset
+- [真实数据搜索复现](docs/cn/SEARCH_REAL_DATA_REPRO.md) - 使用公开 VHH 数据集复现实验
 - [中文文档](docs/cn/README.md) - 完整技术文档
+- [搜索快速上手](docs/cn/SEARCH_QUICKSTART.md) - 索引与异步搜索快速指南
 - [TODO / Development Plan](docs/en/TODO.md) - Implementation status
 
 ## Project Structure
