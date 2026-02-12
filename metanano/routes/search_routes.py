@@ -292,7 +292,7 @@ async def index_sequence(request: IndexSequenceRequest) -> Dict[str, str]:
             当索引失败时抛出。
     """
     try:
-        k = getattr(_config.search, "k", 5)
+        k = _config.search.k
         kmers = generate_kmers(request.sequence, k=k)
         _search_service.index_sequence(
             seq_id=request.id,

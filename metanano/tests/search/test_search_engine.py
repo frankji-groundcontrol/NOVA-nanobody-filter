@@ -297,11 +297,44 @@ def test_search_uses_parallel_execution(monkeypatch: Any, search_engine_with_cdr
             return _FakeFuture(func(*args, **kwargs))
 
     monkeypatch.setattr(search_engine_module, "ThreadPoolExecutor", _FakeExecutor)
+    monkeypatch.setattr(
+        search_engine_with_cdrs._index_manager,
+        "coarse_filter",
+        lambda **_: [0, 1],
+    )
+    monkeypatch.setattr(type(search_engine_with_cdrs), "_BATCH_SIZE", 2, raising=False)
 
     result = search_engine_with_cdrs.search(query_sequence)
 
     assert submit_calls["count"] > 0
-    assert submit_calls["count"] == result.total_candidates
+    assert result.total_candidates == 2
+    assert submit_calls["count"] == 1
+
+
+def test_align_batch_returns_list_of_matches(search_engine_with_cdrs: Any, query_sequence: str) -> None:
+    result = search_engine_with_cdrs.search(query_sequence)
+    candidate_count = result.total_candidates
+    assert candidate_count > 0
+
+    query_cdrs = search_engine_with_cdrs._resolve_query_cdrs(query_sequence)
+    batch = [
+        search_engine_with_cdrs._index_manager.get_record_by_id(match.target_id)
+        for match in result.matches
+    ]
+    batch_indices = [
+        search_engine_with_cdrs._index_manager._id_to_idx[record.id]
+        for record in batch
+        if record is not None
+    ]
+
+    matches = search_engine_with_cdrs._align_batch(
+        query_sequence,
+        batch_indices,
+        False,
+        query_cdrs,
+    )
+
+    assert len(matches) == len(batch_indices)
 
 
 def test_search_tied_identity_orders_by_target_id(
@@ -361,6 +394,57 @@ def test_search_tied_identity_orders_by_target_id(
     result = engine.search(query_sequence)
 
     assert [match.target_id for match in result.matches] == ["a_target", "z_target"]
+
+
+def test_search_uses_lsh_strategy_when_configured(
+    monkeypatch: Any,
+    search_engine_with_cdrs: Any,
+    query_sequence: str,
+) -> None:
+    search_engine_with_cdrs._config.coarse_filter.retrieval_strategy = "lsh"
+    calls = {"coarse": 0, "lsh": 0}
+
+    def _fake_coarse_filter(**_: Any) -> list[int]:
+        calls["coarse"] += 1
+        return []
+
+    def _fake_lsh_query(**_: Any) -> list[int]:
+        calls["lsh"] += 1
+        return []
+
+    monkeypatch.setattr(search_engine_with_cdrs._index_manager, "coarse_filter", _fake_coarse_filter)
+    monkeypatch.setattr(search_engine_with_cdrs._index_manager, "lsh_query", _fake_lsh_query)
+
+    result = search_engine_with_cdrs.search(query_sequence)
+
+    assert calls["lsh"] == 1
+    assert calls["coarse"] == 0
+    assert result.total_candidates == 0
+
+
+def test_search_uses_kmer_strategy_by_default(
+    monkeypatch: Any,
+    search_engine_with_cdrs: Any,
+    query_sequence: str,
+) -> None:
+    calls = {"coarse": 0, "lsh": 0}
+
+    def _fake_coarse_filter(**_: Any) -> list[int]:
+        calls["coarse"] += 1
+        return []
+
+    def _fake_lsh_query(**_: Any) -> list[int]:
+        calls["lsh"] += 1
+        return []
+
+    monkeypatch.setattr(search_engine_with_cdrs._index_manager, "coarse_filter", _fake_coarse_filter)
+    monkeypatch.setattr(search_engine_with_cdrs._index_manager, "lsh_query", _fake_lsh_query)
+
+    result = search_engine_with_cdrs.search(query_sequence)
+
+    assert calls["coarse"] == 1
+    assert calls["lsh"] == 0
+    assert result.total_candidates == 0
 
 
 def test_search_result_dataclass(search_engine_with_cdrs: Any, query_sequence: str) -> None:

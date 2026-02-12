@@ -127,6 +127,8 @@ class SearchEngine:
         - metanano/routes/search_routes.py (future)
     """
 
+    _BATCH_SIZE: int = 16
+
     def __init__(
         self,
         config: SearchConfig,
@@ -179,7 +181,7 @@ class SearchEngine:
         """
         started = time.perf_counter()
 
-        k = getattr(self._config, "k", 5)
+        k = self._config.k
         query_kmers = generate_kmers(query, k=k)
 
         min_shared = (
@@ -192,39 +194,52 @@ class SearchEngine:
             if coarse_jaccard is not None
             else self._config.coarse_filter.jaccard_threshold
         )
-        max_candidates = getattr(self._config.coarse_filter, "max_candidates", 500)
+        max_candidates = self._config.coarse_filter.max_candidates
 
         final_exclude_ids = set(exclude_ids or set())
-        for idx in range(self._index_manager.size()):
-            record = self._index_manager.get_record(idx)
-            if record.sequence == query:
-                final_exclude_ids.add(record.id)
+        final_exclude_ids.update(self._index_manager.get_ids_for_sequence(query))
 
-        candidate_indices = self._index_manager.coarse_filter(
-            query_kmers=query_kmers,
-            min_shared=min_shared,
-            jaccard_threshold=jaccard_threshold,
-            max_candidates=max_candidates,
-            exclude_ids=final_exclude_ids,
-        )
+        if self._config.coarse_filter.retrieval_strategy == "lsh":
+            candidate_indices = self._index_manager.lsh_query(
+                query_kmers=query_kmers,
+                max_candidates=max_candidates,
+                exclude_ids=final_exclude_ids,
+            )
+        else:
+            candidate_indices = self._index_manager.coarse_filter(
+                query_kmers=query_kmers,
+                min_shared=min_shared,
+                jaccard_threshold=jaccard_threshold,
+                max_candidates=max_candidates,
+                exclude_ids=final_exclude_ids,
+            )
 
         query_cdrs = self._resolve_query_cdrs(query)
         matches: List[SearchMatch] = []
 
         if candidate_indices:
-            max_workers = max(1, min(32, len(candidate_indices)))
+            batch_size = max(1, self._BATCH_SIZE)
+            candidate_batches = [
+                candidate_indices[idx : idx + batch_size]
+                for idx in range(0, len(candidate_indices), batch_size)
+            ]
+            max_workers = max(1, min(32, len(candidate_batches)))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [
                     executor.submit(
-                        self._align_candidate,
+                        self._align_batch,
                         query,
-                        candidate_index,
+                        candidate_batch,
                         include_alignment,
                         query_cdrs,
                     )
-                    for candidate_index in candidate_indices
+                    for candidate_batch in candidate_batches
                 ]
-                matches = [future.result() for future in futures]
+                matches = [
+                    match
+                    for future in futures
+                    for match in future.result()
+                ]
 
         matches.sort(key=lambda match: (-match.identity, match.target_id))
         elapsed_ms = (time.perf_counter() - started) * 1000.0
@@ -281,6 +296,23 @@ class SearchEngine:
             cdr_similarity=self._compare_cdrs(query_cdrs, target_record.cdrs),
         )
 
+    def _align_batch(
+        self,
+        query: str,
+        candidate_indices: List[int],
+        include_alignment: bool,
+        query_cdrs: Optional[Dict[str, str]],
+    ) -> List[SearchMatch]:
+        return [
+            self._align_candidate(
+                query,
+                candidate_index,
+                include_alignment,
+                query_cdrs,
+            )
+            for candidate_index in candidate_indices
+        ]
+
     def _resolve_query_cdrs(self, query: str) -> Optional[Dict[str, str]]:
         """
         Resolve query CDRs from indexed records first, extraction second.
@@ -294,9 +326,9 @@ class SearchEngine:
             Optional[Dict[str, str]]: CDR dictionary if available.
                 若可用则返回 CDR 字典。
         """
-        for idx in range(self._index_manager.size()):
-            record = self._index_manager.get_record(idx)
-            if record.sequence == query and record.cdrs is not None:
+        for seq_id in self._index_manager.get_ids_for_sequence(query):
+            record = self._index_manager.get_record_by_id(seq_id)
+            if record is not None and record.cdrs is not None:
                 return record.cdrs
         return extract_cdrs(query)
 

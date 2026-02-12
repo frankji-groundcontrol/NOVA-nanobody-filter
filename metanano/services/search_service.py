@@ -73,10 +73,10 @@ class SearchService:
         self._alignment_engine = AlignmentEngine(config.fine_alignment)
         self._search_engine = SearchEngine(config, self._index_manager, self._alignment_engine)
 
-        ttl_seconds = getattr(config, "job_ttl_seconds", 3600.0)
+        ttl_seconds = config.job_ttl_seconds
         self._job_manager = JobManager(ttl_seconds=ttl_seconds)
 
-        max_concurrent = getattr(config, "max_concurrent_search", 4)
+        max_concurrent = config.max_concurrent_search
         self._semaphore = asyncio.Semaphore(max_concurrent)
 
     async def submit_search(
