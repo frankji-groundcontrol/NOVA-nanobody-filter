@@ -16,23 +16,42 @@ Consumers / 调用方:
     - metanano/filters/diversity.py
 """
 
-from typing import Optional, Set
+from collections.abc import Set as AbstractSet
+from importlib import import_module
+from typing import Protocol, cast
 
 from metanano.utils.kmer import generate_kmers, generate_kmers_with_counts
 
 
+class MinHashLike(Protocol):
+    num_perm: int
+
+    def update(self, value: bytes) -> None: ...
+
+    def jaccard(self, other: "MinHashLike") -> float: ...
+
+
+class MinHashFactory(Protocol):
+    def __call__(self, *, num_perm: int) -> MinHashLike: ...
+
+
+def _get_minhash_factory() -> MinHashFactory:
+    datasketch = import_module("datasketch")
+    return cast(MinHashFactory, getattr(datasketch, "MinHash"))
+
+
 def compute_kmer_similarity_precomputed(
-    kmers1: Set[str],
-    kmers2: Set[str],
+    kmers1: AbstractSet[object],
+    kmers2: AbstractSet[object],
 ) -> float:
     """
     Compute Jaccard similarity from pre-generated k-mer sets (avoids regeneration).
     从预生成的 k-mer 集合计算 Jaccard 相似度（避免重新生成）。
 
     Args / 参数:
-        kmers1 (Set[str]): First set of k-mers.
+        kmers1 (AbstractSet[object]): First set of k-mers.
             第一个 k-mer 集合。
-        kmers2 (Set[str]): Second set of k-mers.
+        kmers2 (AbstractSet[object]): Second set of k-mers.
             第二个 k-mer 集合。
 
     Returns / 返回:
@@ -52,8 +71,8 @@ def compute_kmer_similarity_precomputed(
     if not kmers1 or not kmers2:
         return 0.0
 
-    intersection = len(kmers1 & kmers2)
-    union = len(kmers1 | kmers2)
+    intersection = len(set(kmers1).intersection(kmers2))
+    union = len(set(kmers1).union(kmers2))
 
     if union == 0:
         return 0.0
@@ -142,7 +161,7 @@ def weighted_minhash(
         - metanano/filters/diversity.py: DiversityFilter.check_historical_similarity
     """
     try:
-        from datasketch import MinHash
+        minhash_factory = _get_minhash_factory()
 
         # Generate k-mers
         # 生成 k-mer
@@ -154,8 +173,8 @@ def weighted_minhash(
 
         # Create MinHash objects
         # 创建 MinHash 对象
-        m1 = MinHash(num_perm=num_perm)
-        m2 = MinHash(num_perm=num_perm)
+        m1 = minhash_factory(num_perm=num_perm)
+        m2 = minhash_factory(num_perm=num_perm)
 
         for kmer in kmers1:
             m1.update(kmer.encode("utf-8"))
@@ -168,6 +187,26 @@ def weighted_minhash(
         # Fall back to exact computation if datasketch not available
         # 如果 datasketch 不可用，回退到精确计算
         return compute_kmer_similarity(seq1, seq2, k)
+
+
+def generate_minhash_signature(
+    sequence: str,
+    k: int = 5,
+    num_perm: int = 128,
+) -> MinHashLike | None:
+    try:
+        minhash_factory = _get_minhash_factory()
+
+        kmers = generate_kmers(sequence, k)
+        if not kmers:
+            return None
+
+        signature = minhash_factory(num_perm=num_perm)
+        for kmer in kmers:
+            signature.update(kmer.encode("utf-8"))
+        return signature
+    except ImportError:
+        return None
 
 
 def weighted_jaccard(
@@ -218,8 +257,3 @@ def weighted_jaccard(
         return 0.0
 
     return min_sum / max_sum
-
-
-
-
-
