@@ -113,7 +113,27 @@ def test_search_config_defaults():
     # Assert / 断言
     assert config.coarse_filter.min_shared_kmers == 3
     assert config.coarse_filter.jaccard_threshold == 0.3
+    assert config.coarse_filter.max_candidates == 500
     assert config.fine_alignment.gap_open == 10
+    assert config.k == 5
+    assert config.job_ttl_seconds == 3600.0
+    assert config.max_concurrent_search == 4
+    assert config.coarse_filter.retrieval_strategy == "kmer_jaccard"
+    assert config.lsh.num_perm == 128
+    assert config.lsh.lsh_threshold == 0.3
+    assert config.lsh.weights == (0.5, 0.5)
+
+
+def test_search_config_lsh_threshold_must_not_exceed_coarse_threshold():
+    import pytest
+
+    from metanano.config import CoarseFilterConfig, LSHConfig, SearchConfig
+
+    with pytest.raises(ValueError):
+        SearchConfig(
+            coarse_filter=CoarseFilterConfig(jaccard_threshold=0.3),
+            lsh=LSHConfig(lsh_threshold=0.5),
+        )
 
 
 def test_root_config_includes_search():

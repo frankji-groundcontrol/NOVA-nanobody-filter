@@ -22,9 +22,9 @@ Consumers / 调用方:
 """
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class MMseqs2Config(BaseModel):
@@ -542,6 +542,34 @@ class CoarseFilterConfig(BaseModel):
         description="Minimum Jaccard similarity threshold for coarse filtering. / "
         "粗过滤的最小 Jaccard 相似度阈值。",
     )
+    max_candidates: int = Field(
+        default=500,
+        ge=1,
+        description="Maximum number of coarse-filter candidates to keep. / "
+        "粗过滤阶段保留的最大候选数量。",
+    )
+    retrieval_strategy: Literal["kmer_jaccard", "lsh"] = Field(
+        default="kmer_jaccard",
+        description="Candidate retrieval strategy used before alignment. / 对齐前的候选检索策略。",
+    )
+
+
+class LSHConfig(BaseModel):
+    num_perm: int = Field(
+        default=128,
+        ge=16,
+        description="Number of MinHash permutations. / MinHash 排列数。",
+    )
+    lsh_threshold: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="LSH similarity threshold for candidate retrieval. / 候选检索的 LSH 相似度阈值。",
+    )
+    weights: Tuple[float, float] = Field(
+        default=(0.5, 0.5),
+        description="LSH optimization weights (false_positive, false_negative). / LSH 优化权重。",
+    )
 
 
 class FineAlignmentConfig(BaseModel):
@@ -580,6 +608,33 @@ class SearchConfig(BaseModel):
         description="Fine alignment settings for precise similarity scoring. / "
         "用于精确相似度评分的精细对齐设置。",
     )
+    k: int = Field(
+        default=5,
+        ge=1,
+        description="K-mer length used by sequence search indexing and query generation. / "
+        "序列搜索索引和查询生成使用的 k-mer 长度。",
+    )
+    job_ttl_seconds: float = Field(
+        default=3600.0,
+        ge=1.0,
+        description="TTL in seconds for asynchronous search jobs. / 异步搜索任务的过期时间（秒）。",
+    )
+    max_concurrent_search: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum number of concurrent search jobs executed by SearchService. / "
+        "SearchService 同时执行的最大搜索任务数。",
+    )
+    lsh: LSHConfig = Field(
+        default_factory=LSHConfig,
+        description="LSH-related configuration for approximate retrieval. / 近似检索的 LSH 配置。",
+    )
+
+    @model_validator(mode="after")
+    def _validate_lsh_threshold(self) -> "SearchConfig":
+        if self.lsh.lsh_threshold > self.coarse_filter.jaccard_threshold:
+            raise ValueError("lsh.lsh_threshold must be <= coarse_filter.jaccard_threshold")
+        return self
 
 
 class DevelopabilityConfig(BaseModel):
@@ -674,4 +729,3 @@ class Config(BaseModel):
         # Allow extra fields for future extensibility
         # 允许额外字段以便未来扩展
         extra = "allow"
-
