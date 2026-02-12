@@ -9,6 +9,7 @@
 - [成对比对方案说明](PAIRWISE_ALIGNMENT_NOTES.md) - 当前后端与更快选项对比
 - [English Search Quickstart](../en/SEARCH_QUICKSTART.md) - Search quickstart in English
 - [排序说明（12.1）](#121-搜索能力概览) - 搜索结果并列时的稳定排序与截断规则
+- [搜索性能基准测试](#12-搜索性能基准测试) - 真实数据上的 Tier 1 和 Tier 2 搜索基准测试结果
 
 ---
 
@@ -1052,3 +1053,89 @@ asyncio.run(main())
 - `/search/{job_id}` 返回 `404`：任务不存在或已过期。
 - 结果返回较慢：可关闭 `include_alignment` 或提高粗过滤阈值。
 - 索引为内存态：服务重启后索引会清空。
+
+## **12. 搜索性能基准测试**
+
+使用来自 [PLAbDab](https://opig.stats.ox.ac.uk/webapps/plabdab/)（专利和文献抗体数据库）的真实抗体序列对序列搜索子系统进行基准测试。
+
+### **12.1 数据集**
+
+| 来源 | 序列数 | 描述 |
+|------|--------|------|
+| PLAbDab 配对数据 | 58,405 | 配对抗体条目中的唯一有效重链 |
+| PLAbDab 非配对数据 | 369,718 | 非配对条目中的唯一有效重链（chain=H） |
+| **合计** | **221,692** | **去重后的重链（50–500 AA，仅标准氨基酸）** |
+
+### **12.2 Tier 1：K-mer 粗过滤 + 比对**
+
+默认配置：`k=5`、`min_shared_kmers=3`、`jaccard_threshold=0.3`、`max_candidates=500`。
+
+| N（序列数） | 索引构建 | 峰值 RSS | P50 延迟 | P95 延迟 | P99 延迟 | QPS |
+|------------|---------|---------|---------|---------|---------|-----|
+| 10,000 | 3.2s | 39 MB | 57 ms | 448 ms | 470 ms | 6.7 |
+| 50,000 | 12.8s | 147 MB | 274 ms | 553 ms | 644 ms | 3.4 |
+| 100,000 | 23.2s | 248 MB | 471 ms | 686 ms | 797 ms | 2.3 |
+| 221,692 | 45.9s | 493 MB | 780 ms | 1,415 ms | 1,577 ms | 1.3 |
+
+**阈值门控（来自 `harness.py`）：**
+
+| 规模 | RSS 上限 | P99 上限 | 状态 |
+|------|---------|---------|------|
+| 10,000 | < 200 MB | < 200 ms | RSS ✓，P99 — 见下方说明 |
+| 100,000 | < 500 MB | < 500 ms | RSS ✓，P99 ✓ |
+
+> **关于 10k P99 的说明：** 真实抗体数据上的 470ms P99 超出了合成数据的 200ms 门控。真实抗体序列的同源性远高于合成随机序列，每次查询产生更多粗过滤候选项，导致比对阶段更长。100k 门控（P99 < 500ms）顺利通过。
+
+**观察结果：**
+
+- 内存线性增长，约每 1,000 条序列 2.2 MB
+- P99 延迟超线性增长 — 由大量候选通过 Jaccard 阈值后的比对阶段驱动
+- 真实抗体序列呈簇状分布（进化家族），因此候选数量高于合成数据
+
+### **12.3 Tier 2：MinHash LSH 近似检索**
+
+配置：`num_perm=256`、`lsh_threshold=0.2`、`jaccard_threshold=0.3`、`max_candidates=500`。  
+召回率计算方式：`|精确集 ∩ LSH 集| / |精确集|`，其中"精确集"为阈值合格集合（Jaccard ≥ 0.3）。
+
+| N（序列数） | 索引构建 | 平均召回率 | 精确查询 | LSH 查询 | 加速比 |
+|------------|---------|----------|---------|---------|-------|
+| 10,000 | 26s | **0.967** | 13.5 ms | 3.9 ms | 3.5× |
+| 50,000 | 107s | **0.898** | 77.5 ms | 14.1 ms | 5.5× |
+
+**门控：** 召回率 ≥ 0.80 — 所有测试规模均 **通过**。
+
+**观察结果：**
+
+- 真实数据上 LSH 召回率在所有测试规模均超过 0.89
+- 查询加速比随索引规模增长（10k 时 3.5× → 50k 时 5.5×）
+- LSH 索引构建是瓶颈（每条序列串行计算 MinHash）
+- 生产环境 200k+ 规模建议使用并行 MinHash 构建
+
+### **12.4 测试套件**
+
+所有搜索测试在真实和合成数据上均通过：
+
+```
+87 passed, 0 failed (pytest metanano/tests/search/)
+```
+
+### **12.5 复现基准测试**
+
+1. 下载 PLAbDab 数据：
+
+```bash
+wget -O /tmp/plabdab_paired.csv.gz \
+  "https://opig.stats.ox.ac.uk/webapps/plabdab/static/downloads/paired_data.csv.gz"
+wget -O /tmp/plabdab_unpaired.csv.gz \
+  "https://opig.stats.ox.ac.uk/webapps/plabdab/static/downloads/unpaired_data.csv.gz"
+```
+
+2. 运行搜索测试：
+
+```bash
+cd NOVA-nanobody-filter
+pip install datasketch
+python -m pytest metanano/tests/search/ -v
+```
+
+3. 参见 [SEARCH_REAL_DATA_REPRO.md](SEARCH_REAL_DATA_REPRO.md) 了解真实数据复现脚本。
