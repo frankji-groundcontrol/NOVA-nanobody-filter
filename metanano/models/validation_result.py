@@ -77,11 +77,11 @@ class NativenessDetails(BaseModel):
     )
     nativeness_score: Optional[float] = Field(
         default=None,
-        description="AbnatiV nativeness score (0-1). / AbnatiV 天然性分数（0-1）。",
+        description="Nativeness score (0-1). / 天然性分数（0-1）。",
     )
     humanness_score: Optional[float] = Field(
         default=None,
-        description="AbnatiV humanness score (0-1). / AbnatiV 人源性分数（0-1）。",
+        description="Humanness score (0-1). / 人源性分数（0-1）。",
     )
     promb_score: Optional[float] = Field(
         default=None,

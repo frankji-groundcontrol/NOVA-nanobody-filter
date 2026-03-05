@@ -8,11 +8,11 @@ File / 文件:
     - metanano/services/nativeness_service.py
 
 Overview / 概述:
-    Async nativeness service with semaphore-based concurrency control.
-    基于信号量的异步天然性服务并发控制。
+    Async nativeness service with concurrency control.
+    具有并发控制的异步天然性服务。
 
-    Uses GPU scheduler for AbnatiV scoring when available.
-    当可用时使用 GPU 调度器进行 AbnatiV 评分。
+    Wraps the nativeness filter and runs scoring in background threads.
+    封装天然性过滤器，并在后台线程中运行评分。
 
 Consumers / 调用方:
     - metanano/services/__init__.py
@@ -35,10 +35,8 @@ class NativenessService:
     Async service for nativeness filter operations.
     天然性过滤器操作的异步服务。
 
-    Wraps NativenessFilter with async execution and semaphore control.
-    Uses GPU scheduler for AbnatiV scoring when available.
-    用异步执行和信号量控制封装 NativenessFilter。
-    当可用时使用 GPU 调度器进行 AbnatiV 评分。
+    Wraps NativenessFilter with async execution.
+    用异步执行封装 NativenessFilter。
 
     Example / 示例:
         >>> service = NativenessService(config)
@@ -94,11 +92,8 @@ class NativenessService:
 
     async def compute_nativeness_score_async(self, sequence: str) -> Optional[float]:
         """
-        Async compute nativeness score using AbnatiV v2.
-        异步使用 AbnatiV v2 计算天然性分数。
-
-        Uses GPU scheduler if available for GPU-bound computation.
-        如果可用，使用 GPU 调度器进行 GPU 密集型计算。
+        Async compute nativeness score using IgBLAST-based heuristic.
+        异步使用基于 IgBLAST 的启发式方法计算天然性分数。
 
         Args / 参数:
             sequence (str): The nanobody sequence. / 纳米抗体序列。
@@ -108,36 +103,20 @@ class NativenessService:
         """
         await self.manager.initialize()
 
-        # Use GPU scheduler if available
-        # 如果可用，使用 GPU 调度器
-        gpu_scheduler = self.manager.gpu_scheduler
-        if gpu_scheduler and gpu_scheduler.config.enabled:
-            async def compute_with_gpu(sequence: str, gpu_index: int) -> Optional[float]:
-                """Compute with specific GPU. / 使用特定 GPU 计算。"""
-                import os
-                os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
-                return self._filter.compute_nativeness_score(sequence)
-
-            try:
-                return await gpu_scheduler.run_on_gpu(compute_with_gpu, sequence)
-            except Exception:
-                pass  # Fall back to CPU
-
-        # CPU fallback with semaphore
-        # 使用信号量的 CPU 回退
-        async with self.manager.abnativ_semaphore:
-            return await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._filter.compute_nativeness_score,
-                    sequence,
-                ),
-                timeout=self.manager.task_timeout,
-            )
+        # Run in a background thread with standard timeout.
+        # 在后台线程中运行，并应用通用超时。
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                self._filter.compute_nativeness_score,
+                sequence,
+            ),
+            timeout=self.manager.task_timeout,
+        )
 
     async def compute_humanness_score_async(self, sequence: str) -> Optional[float]:
         """
-        Async compute humanness score using AbnatiV v2.
-        异步使用 AbnatiV v2 计算人源性分数。
+        Async compute humanness score using IgBLAST-based heuristic.
+        异步使用基于 IgBLAST 的启发式方法计算人源性分数。
 
         Args / 参数:
             sequence (str): The nanobody sequence. / 纳米抗体序列。
@@ -146,14 +125,13 @@ class NativenessService:
             Optional[float]: Humanness score (0-1) or None.
         """
         await self.manager.initialize()
-        async with self.manager.abnativ_semaphore:
-            return await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._filter.compute_humanness_score,
-                    sequence,
-                ),
-                timeout=self.manager.task_timeout,
-            )
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                self._filter.compute_humanness_score,
+                sequence,
+            ),
+            timeout=self.manager.task_timeout,
+        )
 
     async def compute_promb_score_async(self, sequence: str) -> Optional[float]:
         """

@@ -58,12 +58,12 @@
 | 指标 | 阈值 | 工具 |
 |------|------|------|
 | IMGT 编号 | 成功编号 | abnumber |
-| 天然性分数 | >= 0.80 | AbnatiV v2 |
-| 人源性分数 | >= 0.75 | AbnatiV v2 |
+| 天然性分数 | >= 0.80 | 基于 IgBLAST 的 VHH 天然性（内部） |
+| 人源性分数 | >= 0.75 | 基于 IgBLAST 的人源框架（内部） |
 
 * **核心操作：**
   * **abnumber：** 仅保留在 IMGT 方案下成功编号的序列。
-  * **AbnatiV v2：** 
+  * **基于 IgBLAST 的评分（`metanano.utils.igblast_nativeness`）：** 
     * 天然性阈值：`nativeness_score >= 0.80`
     * 人源性阈值：`humanness_score >= 0.75`
   * **可选交叉检查：** 使用 [promb](https://github.com/MSDLLCpapers/promb)（OASis 分数）验证人源性以进行额外验证。
@@ -137,7 +137,7 @@ NOVA-nanobody-filter/
     ├── filters/                # 过滤器实现（同步）
     │   ├── __init__.py
     │   ├── diversity.py        # 多样性过滤器（MMseqs2、k-mer、突变）
-    │   ├── nativeness.py       # 天然性过滤器（abnumber、AbnatiV）
+    │   ├── nativeness.py       # 天然性过滤器（abnumber、基于 IgBLAST 的天然性/人源性）
     │   └── developability.py   # 可开发性过滤器（TNP、红区）
     ├── services/               # 异步服务层（封装过滤器）
     │   ├── __init__.py
@@ -185,7 +185,7 @@ NOVA-nanobody-filter/
         │   ├── test_tnp.py     # TNP 封装测试（12 个测试）
         │   ├── test_mmseqs2.py # MMseqs2 封装测试（11 个测试）
         │   ├── test_abnumber.py # abnumber/CDR 提取测试（15 个测试）
-        │   ├── test_abnativ.py  # AbnatiV v2 评分测试（12 个测试）
+        │   ├── test_igblast_nativeness.py  # IgBLAST 天然性/人源性测试（12 个测试）
         │   ├── test_promb.py    # promb/OASis 人源性测试（16 个测试）
         │   └── test_datasketch.py # datasketch/MinHash 测试（18 个测试）
         └── routes/             # API 路由集成测试（58 个测试）
@@ -391,8 +391,8 @@ async def validate_sequence(sequence_input: Sequence) -> ValidationResponse:
 
 2. **天然性验证：**
    * 使用 **abnumber** 工具在 IMGT 方案下对序列进行编号。
-   * 使用 **AbnatiV v2** 计算天然性分数（阈值：>= 0.80）。
-   * 计算人源性分数（阈值：>= 0.75）。
+   * 使用 **基于 IgBLAST 的 VHH 天然性启发式方法** 计算天然性分数（阈值：>= 0.80）。
+   * 使用 **基于 IgBLAST 的人源框架启发式方法** 计算人源性分数（阈值：>= 0.75）。
    * 可选：使用 **promb**（OASis 人源性分数）进行交叉检查。
 
 3. **可开发性验证：**
@@ -458,7 +458,7 @@ config.developability.negative_charge_patches.threshold # 1.88
 config.async_config.max_concurrent_validations  # 10（整体流水线）
 config.async_config.max_concurrent_tnp          # 4 （TNP CLI 调用）
 config.async_config.max_concurrent_mmseqs2      # 2 （MMseqs2 聚类）
-config.async_config.max_concurrent_abnativ      # 4 （AbnatiV 评分）
+config.async_config.max_concurrent_abnativ      # 4 （基于 IgBLAST 的天然性评分）
 config.async_config.max_concurrent_promb        # 4 （promb 人源性）
 
 # 批处理设置
@@ -639,7 +639,7 @@ print(f"详情: {result.details}")
 |----|------|------|
 | `mmseqs2` | 多样性过滤器的序列聚类 | [GitHub](https://github.com/soedinglab/MMseqs2) |
 | `abnumber` | 纳米抗体序列的 IMGT 编号 | [GitHub](https://github.com/prihoda/AbNumber) |
-| `abnativ` | 天然性和人源性评分（AbnatiV v2） | [GitLab](https://gitlab.developers.cam.ac.uk/ch/sormanni/abnativ) |
+| `igblast`（随项目分发） | VHH 天然性与人源框架启发式评分后端 | [IgBLAST 文档](https://ncbi.github.io/igblast/) |
 | `promb` | 可选的人源性交叉验证（OASis 分数） | [GitHub](https://github.com/MSDLLCpapers/promb) |
 | `tnp` | 可开发性的治疗性纳米抗体分析器 | [GitHub](https://github.com/oxpig/TNP) |
 | `datasketch` | 相似度计算的加权 MinHash | [GitHub](https://github.com/ekzhu/datasketch) |
@@ -680,21 +680,13 @@ conda activate metanano
 python -m pytest metanano/tests/tools/ -v
 
 # 运行特定工具测试
-python -m pytest metanano/tests/tools/test_tnp.py -v       # TNP（12 个测试）
-python -m pytest metanano/tests/tools/test_mmseqs2.py -v   # MMseqs2（11 个测试）
-python -m pytest metanano/tests/tools/test_abnumber.py -v  # abnumber（15 个测试）
-python -m pytest metanano/tests/tools/test_abnativ.py -v   # AbnatiV v2（12 个测试）
-python -m pytest metanano/tests/tools/test_promb.py -v     # promb（16 个测试）
-python -m pytest metanano/tests/tools/test_datasketch.py -v # datasketch（18 个测试）
+python -m pytest metanano/tests/tools/test_tnp.py -v                 # TNP（12 个测试）
+python -m pytest metanano/tests/tools/test_mmseqs2.py -v             # MMseqs2（11 个测试）
+python -m pytest metanano/tests/tools/test_abnumber.py -v            # abnumber（15 个测试）
+python -m pytest metanano/tests/tools/test_igblast_nativeness.py -v  # IgBLAST 天然性（12 个测试）
+python -m pytest metanano/tests/tools/test_promb.py -v               # promb（16 个测试）
+python -m pytest metanano/tests/tools/test_datasketch.py -v          # datasketch（18 个测试）
 ```
-
-**注意：** 运行 AbnatiV v2 测试前，需要先下载模型：
-
-```bash
-abnativ init
-```
-
-这将从 Zenodo 下载预训练模型（约 5.8GB）到 `~/.abnativ/models/pretrained_models/`。
 
 ### **8.3 运行路由测试**
 
@@ -757,7 +749,7 @@ docker-compose up -d
 | **TNP** | 12 | `utils/tnp_wrapper.py` | 可开发性分析（CLI 封装） |
 | **MMseqs2** | 11 | `utils/mmseqs2_wrapper.py` | 序列聚类（CLI 封装） |
 | **abnumber** | 15 | `utils/cdr_utils.py` | IMGT 编号和 CDR 提取 |
-| **AbnatiV v2** | 12 | `filters/nativeness.py` | 天然性/人源性评分 |
+| **IgBLAST 天然性** | 12 | `utils/igblast_nativeness.py` | 天然性/人源性评分后端 |
 | **promb** | 16 | `filters/nativeness.py` | OASis 人源性评分 |
 | **datasketch** | 18 | `utils/similarity.py` | 加权 MinHash 相似度 |
 | **总计** | **84** | | 全部工具测试通过 |
@@ -792,7 +784,7 @@ if mmseqs2.is_available():
 |------|------|------|
 | **MMseqs2** | 超快速序列聚类和搜索 | [GitHub](https://github.com/soedinglab/MMseqs2) |
 | **AbNumber** | 使用 IMGT、Chothia、Kabat 方案的抗体编号 | [GitHub](https://github.com/prihoda/AbNumber) |
-| **AbnatiV** | 抗体天然性验证（v2） | [GitLab](https://gitlab.developers.cam.ac.uk/ch/sormanni/abnativ) |
+| **IgBLAST** | 免疫球蛋白 V(D)J 比对与注释引擎 | [IgBLAST 文档](https://ncbi.github.io/igblast/) |
 | **BioPhi** | 抗体设计和人源化平台 | [GitHub](https://github.com/Merck/BioPhi) |
 | **promb** | 蛋白质人源性评估工具包（OASis 继任者） | [GitHub](https://github.com/MSDLLCpapers/promb) |
 | **TNP** | 可开发性的治疗性纳米抗体分析器 | [GitHub](https://github.com/oxpig/TNP) |
@@ -807,9 +799,9 @@ if mmseqs2.is_available():
   * 支持 IMGT、Chothia、Kabat 和其他编号方案
   * 验证纳米抗体序列结构
 
-* **AbnatiV v2** - 抗体天然性验证
-  * 评估序列是否属于天然抗体家族
-  * 提供天然性和人源性分数
+* **IgBLAST** - 免疫球蛋白 V(D)J 比对与注释
+  * 为 VHH 序列提供 IMGT 对齐的 FR/CDR 区域
+  * 作为基于 IgBLAST 的 VHH 天然性与人源框架启发式评分的后端
 
 * **BioPhi** - 抗体设计平台
   * 全面的人源化和设计工具
@@ -870,12 +862,12 @@ if mmseqs2.is_available():
 | `validation_semaphore` | 10 | 整体流水线并发 |
 | `tnp_semaphore` | 4 | TNP CLI 子进程调用 |
 | `mmseqs2_semaphore` | 2 | MMseqs2 聚类（I/O 密集） |
-| `abnativ_semaphore` | 4 | AbnatiV 模型推理 |
+| `abnativ_semaphore` | 4 | 基于 IgBLAST 的天然性评分任务 |
 | `promb_semaphore` | 4 | promb 人源性评分 |
 
 ### **11.3 GPU 调度器**
 
-对于 GPU 密集型任务（如 AbnatiV 评分），GPU 调度器提供：
+对于 GPU 密集型任务（例如未来版本中的深度学习评分），GPU 调度器提供：
 
 * **智能 GPU 选择：**
   * 避免重复使用上一个 GPU（用于负载分配）
@@ -913,7 +905,7 @@ if mmseqs2.is_available():
 
 ```python
 # 示例：运行 GPU 密集型任务
-result = await gpu_scheduler.run_on_gpu(compute_abnativ_score, sequence)
+result = await gpu_scheduler.run_on_gpu(some_gpu_bound_function, sequence)
 # gpu_index 会自动注入到函数中
 ```
 

@@ -31,7 +31,7 @@ set -e  # Exit on error / 出错时退出
 
 # Suppress conda plugin warnings (e.g., menuinst)
 # 抑制 conda 插件警告（如 menuinst）
-export CONDA_NO_PLUGINS=true
+#export CONDA_NO_PLUGINS=true # disabled for now to avoid issues with conda-libmamba-solver
 
 # Get script directory / 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

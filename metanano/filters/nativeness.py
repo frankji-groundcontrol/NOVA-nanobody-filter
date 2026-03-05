@@ -4,7 +4,7 @@ References / 参考:
     - docs/cn/README.md: 第1.2节 - 天然性过滤器
     - metanano/config.py: NativenessConfig
     - abnumber library: IMGT numbering
-    - abnativ library: Nativeness/humanness scoring
+    - metanano.utils.igblast_nativeness: IgBLAST-based nativeness/humanness scoring
 
 File / 文件:
     - metanano/filters/nativeness.py
@@ -16,8 +16,8 @@ Overview / 概述:
     Core operations:
     核心操作：
         1. IMGT numbering via abnumber
-        2. Nativeness scoring via AbnatiV v2 (threshold >= 0.80)
-        3. Humanness scoring via AbnatiV v2 (threshold >= 0.75)
+        2. Nativeness scoring via IgBLAST-based VHH nativeness heuristic
+        3. Humanness scoring via IgBLAST-based human framework heuristic
         4. Optional promb cross-validation
 
 Consumers / 调用方:
@@ -25,6 +25,8 @@ Consumers / 调用方:
     - metanano/validators/nativeness_validator.py
 """
 
+import os
+import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -40,8 +42,8 @@ class NativenessResult:
     Attributes / 属性:
         passed: Whether nativeness requirements are met / 是否满足天然性要求
         imgt_numbered: Whether IMGT numbering succeeded / IMGT 编号是否成功
-        nativeness_score: AbnatiV nativeness score / AbnatiV 天然性分数
-        humanness_score: AbnatiV humanness score / AbnatiV 人源性分数
+        nativeness_score: Nativeness score / 天然性分数
+        humanness_score: Humanness score / 人源性分数
         promb_score: Optional promb OASis score / 可选的 promb OASis 分数
         reason: Failure reason if not passed / 未通过时的失败原因
 
@@ -81,8 +83,8 @@ class NativenessFilter:
     This filter checks:
     该过滤器检查：
         1. IMGT numbering success (abnumber)
-        2. Nativeness score >= 0.80 (AbnatiV v2)
-        3. Humanness score >= 0.75 (AbnatiV v2)
+        2. Nativeness score >= 0.80 (IgBLAST VHH nativeness heuristic)
+        3. Humanness score >= 0.75 (IgBLAST human framework heuristic)
         4. Optional: promb OASis humanness cross-validation
 
     Example / 示例:
@@ -109,6 +111,10 @@ class NativenessFilter:
         """
         self.config = config
         self._abnumber_scheme = config.abnumber.scheme
+        # Cache for IgBLAST-based nativeness results to avoid duplicate work
+        # IgBLAST 结果缓存，以避免重复计算
+        self._last_igblast_sequence: Optional[str] = None
+        self._last_igblast_result: Optional[Dict[str, Any]] = None
 
     def number_sequence(self, sequence: str) -> Optional[Dict[str, Any]]:
         """
@@ -142,11 +148,52 @@ class NativenessFilter:
             }
         except Exception:
             return None
+    def _get_igblast_result(self, sequence: str) -> Optional[Dict[str, Any]]:
+        """
+        Run IgBLAST-based nativeness scoring for a single sequence.
+        对单个序列运行基于 IgBLAST 的天然性评分。
+
+        Returns / 返回:
+            Optional[Dict[str, Any]]: Result dict from
+                metanano.utils.igblast_nativeness.run or None on failure. /
+                结果字典或在失败时返回 None。
+        """
+        seq = (sequence or "").strip()
+        if not seq:
+            return None
+
+        # Return cached result if the same sequence was scored previously.
+        # 如果是之前评分过的相同序列，则返回缓存结果。
+        if self._last_igblast_sequence == seq and self._last_igblast_result is not None:
+            return self._last_igblast_result
+
+        try:
+            # Import lazily to avoid hard dependency when not needed.
+            # 延迟导入以避免在不需要时产生硬依赖。
+            from metanano.utils import igblast_nativeness
+
+            with tempfile.TemporaryDirectory() as td:
+                fasta_path = os.path.join(td, "query.fasta")
+                with open(fasta_path, "w", encoding="utf-8") as fh:
+                    fh.write(">query\n")
+                    fh.write(seq + "\n")
+
+                results = igblast_nativeness.run(fasta_path)
+        except Exception:
+            return None
+
+        if not results:
+            return None
+
+        result = results[0]
+        self._last_igblast_sequence = seq
+        self._last_igblast_result = result
+        return result
 
     def compute_nativeness_score(self, sequence: str) -> Optional[float]:
         """
-        Compute nativeness score using AbnatiV v2 (VHH model).
-        使用 AbnatiV v2 (VHH 模型) 计算天然性分数。
+        Compute nativeness score using IgBLAST-based VHH nativeness heuristic.
+        使用基于 IgBLAST 的 VHH 天然性启发式方法计算天然性分数。
 
         Args / 参数:
             sequence (str): The nanobody sequence.
@@ -157,33 +204,28 @@ class NativenessFilter:
                 天然性分数（0-1），如果失败则返回 None。
 
         References / 参考:
-            - abnativ library: abnativ_scoring with VHH model
+            - metanano.utils.igblast_nativeness: vhh_nativeness_score
 
         Consumers / 调用方:
             - NativenessFilter.analyze
         """
+        result = self._get_igblast_result(sequence)
+        if not result:
+            return None
+        if result.get("hard_reject"):
+            return None
+        score = result.get("vhh_nativeness")
+        if score is None:
+            return None
         try:
-            from abnativ.scoring import abnativ_scoring
-            from Bio.Seq import Seq
-            from Bio.SeqRecord import SeqRecord
-
-            record = SeqRecord(Seq(sequence), id="query")
-            result, _ = abnativ_scoring(
-                model_type="VHH",
-                seq_records=[record],
-                mean_score_only=True,
-                do_align=True,
-                is_VHH=True,
-                verbose=False,
-            )
-            return float(result["AbNatiV VHH Score"].iloc[0])
+            return float(score)
         except Exception:
             return None
 
     def compute_humanness_score(self, sequence: str) -> Optional[float]:
         """
-        Compute humanness score using AbnatiV v2 (VH model).
-        使用 AbnatiV v2 (VH 模型) 计算人源性分数。
+        Compute humanness score using IgBLAST-based human framework heuristic.
+        使用基于 IgBLAST 的人源框架启发式方法计算人源性分数。
 
         Args / 参数:
             sequence (str): The nanobody sequence.
@@ -194,26 +236,21 @@ class NativenessFilter:
                 人源性分数（0-1），如果失败则返回 None。
 
         References / 参考:
-            - abnativ library: abnativ_scoring with VH model
+            - metanano.utils.igblast_nativeness: human_framework_score
 
         Consumers / 调用方:
             - NativenessFilter.analyze
         """
+        result = self._get_igblast_result(sequence)
+        if not result:
+            return None
+        if result.get("hard_reject"):
+            return None
+        score = result.get("human_framework")
+        if score is None:
+            return None
         try:
-            from abnativ.scoring import abnativ_scoring
-            from Bio.Seq import Seq
-            from Bio.SeqRecord import SeqRecord
-
-            record = SeqRecord(Seq(sequence), id="query")
-            result, _ = abnativ_scoring(
-                model_type="VH",
-                seq_records=[record],
-                mean_score_only=True,
-                do_align=True,
-                is_VHH=True,  # Use VHH alignment for nanobodies
-                verbose=False,
-            )
-            return float(result["AbNatiV VH Score"].iloc[0])
+            return float(score)
         except Exception:
             return None
 
@@ -266,7 +303,7 @@ class NativenessFilter:
 
         References / 参考:
             - abnumber library
-            - abnativ library
+            - metanano.utils.igblast_nativeness
             - promb library (optional)
 
         Consumers / 调用方:

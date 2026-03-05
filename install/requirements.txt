@@ -30,9 +30,6 @@ wheel
 # biopython（>=1.81 需要用于 Python 3.12 兼容性）
 biopython==1.86
 
-# AbnatiV v2: Nativeness scoring / 天然性评分
-git+https://gitlab.developers.cam.ac.uk/ch/sormanni/abnativ.git@da4a2e93a8e56a2409a565afaee6b82527ea6876
-
 # openmm for structure modeling / 结构建模
 openmm[cuda12]
 
