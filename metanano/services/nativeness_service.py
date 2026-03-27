@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, Optional
+import dataclasses
 
 from metanano.config import NativenessConfig
 from metanano.filters.nativeness import NativenessFilter, NativenessResult
@@ -159,77 +160,33 @@ class NativenessService:
 
     async def analyze_async(self, sequence: str) -> Dict[str, Any]:
         """
-        Perform complete async nativeness analysis.
-        执行完整的异步天然性分析。
+        Async analyze nanobody sequence.
+        异步分析纳米抗体序列。
 
         Args / 参数:
-            sequence (str): The sequence to analyze. / 要分析的序列。
+            sequence (str): The nanobody sequence. / 纳米抗体序列。
 
         Returns / 返回:
-            Dict[str, Any]: Complete analysis result. / 完整的分析结果。
+            Dict[str, Any]: The analysis result. / 分析结果。
         """
         await self.manager.initialize()
 
-        # Step 1: IMGT numbering
-        # 第1步：IMGT 编号
-        numbered = await self.number_sequence_async(sequence)
-        if not numbered:
-            return {
-                "passed": False,
-                "imgt_numbered": False,
-                "reason": "Failed to number sequence under IMGT scheme. / "
-                "无法使用 IMGT 方案对序列编号。",
-            }
+        raw = await asyncio.wait_for(
+            asyncio.to_thread(self._filter.analyze, sequence),
+            timeout=self.manager.task_timeout,
+        )
 
-        result: Dict[str, Any] = {
-            "passed": True,
-            "imgt_numbered": True,
-            "cdr1": numbered.get("cdr1"),
-            "cdr2": numbered.get("cdr2"),
-            "cdr3": numbered.get("cdr3"),
-        }
+        # raw already has nativeness, humanness, CDRs, reject info
+        result = dataclasses.asdict(raw)
 
-        # Step 2: Nativeness score
-        # 第2步：天然性分数
-        nativeness = await self.compute_nativeness_score_async(sequence)
-        if nativeness is None:
-            result["passed"] = False
-            result["reason"] = "Failed to compute nativeness score. / 无法计算天然性分数。"
-            return result
-
-        result["nativeness_score"] = nativeness
-        threshold = self.config.abnativ_v2.nativeness_threshold
-        if nativeness < threshold:
-            result["passed"] = False
-            result["reason"] = (
-                f"nativeness_score ({nativeness:.2f}) below threshold ({threshold}). / "
-                f"天然性分数 ({nativeness:.2f}) 低于阈值 ({threshold})。"
-            )
-            return result
-
-        # Step 3: Humanness score
-        # 第3步：人源性分数
-        humanness = await self.compute_humanness_score_async(sequence)
-        if humanness is None:
-            result["passed"] = False
-            result["reason"] = "Failed to compute humanness score. / 无法计算人源性分数。"
-            return result
-
-        result["humanness_score"] = humanness
-        threshold = self.config.abnativ_v2.humanness_threshold
-        if humanness < threshold:
-            result["passed"] = False
-            result["reason"] = (
-                f"humanness_score ({humanness:.2f}) below threshold ({threshold}). / "
-                f"人源性分数 ({humanness:.2f}) 低于阈值 ({threshold})。"
-            )
-            return result
-
-        # Step 4: Optional promb cross-validation
-        # 第4步：可选的 promb 交叉验证
-        promb_score = await self.compute_promb_score_async(sequence)
-        if promb_score is not None:
-            result["promb_score"] = promb_score
+        # Optional promb cross-validation
+        if self.config.promb.enabled:
+            async with self.manager.promb_semaphore:
+                promb_score = await asyncio.wait_for(
+                    asyncio.to_thread(self._filter.compute_promb_score, sequence),
+                    timeout=self.manager.task_timeout,
+                )
+                if promb_score is not None:
+                    result["promb_score"] = promb_score
 
         return result
-

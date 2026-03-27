@@ -25,8 +25,6 @@ Consumers / 调用方:
     - metanano/validators/nativeness_validator.py
 """
 
-import os
-import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -171,14 +169,7 @@ class NativenessFilter:
             # Import lazily to avoid hard dependency when not needed.
             # 延迟导入以避免在不需要时产生硬依赖。
             from metanano.utils import igblast_nativeness
-
-            with tempfile.TemporaryDirectory() as td:
-                fasta_path = os.path.join(td, "query.fasta")
-                with open(fasta_path, "w", encoding="utf-8") as fh:
-                    fh.write(">query\n")
-                    fh.write(seq + "\n")
-
-                results = igblast_nativeness.run(fasta_path)
+            results = igblast_nativeness.run(seq)
         except Exception:
             return None
 
