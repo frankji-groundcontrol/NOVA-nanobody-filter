@@ -51,6 +51,9 @@ fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
 pydantic>=2.0.0
 
+# Bittensor - integration with NOVA
+bittensor==9.9.0
+
 # Additional dependencies from full environment / 完整环境的额外依赖
 # These are pulled in by the above packages but listed for reproducibility
 # 这些是由上述包引入的，但为了可重现性而列出
