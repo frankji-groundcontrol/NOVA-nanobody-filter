@@ -17,7 +17,7 @@ The system validates nanobody sequences through a three-stage pipeline:
 │  1. Diversity   │ -> │  2. Nativeness  │ -> │ 3. Developability│
 │     Filter      │    │     Filter      │    │     Filter      │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-     MMseqs2              AbnatiV v2              TNP Profiler
+     MMseqs2              IgBlast                 TNP Profiler
      CDR mutations        IMGT numbering          Red region check
      K-mer similarity     Humanness score         Surface patches
 ```
@@ -27,7 +27,7 @@ The system validates nanobody sequences through a three-stage pipeline:
 | Feature | Description |
 |---------|-------------|
 | **Diversity Filter** | MMseqs2 clustering, CDR mutation checks, historical similarity |
-| **Nativeness Filter** | IMGT numbering, nativeness/humanness scoring (AbnatiV v2) |
+| **Nativeness Filter** | IMGT numbering, nativeness/humanness scoring |
 | **Developability Filter** | TNP profiling, red region validation, charge patch analysis |
 | **Async Architecture** | Semaphore-controlled concurrency, GPU scheduler |
 | **REST API** | FastAPI endpoints with OpenAPI documentation |
@@ -48,7 +48,7 @@ conda activate metanano
 # Install dependencies
 pip install -r install/requirements.txt
 
-# Install external tools (MMseqs2, TNP, AbnatiV, etc.)
+# Install external tools (MMseqs2, TNP, etc.)
 bash install/install.sh
 ```
 
@@ -245,7 +245,7 @@ asyncio.run(main())
 - CDR combined mutations: ≥ 2
 - CDR3 mutations: ≥ 1
 
-### Nativeness (AbnatiV v2)
+### Nativeness (IgBlast)
 - Nativeness score: ≥ 0.80
 - Humanness score: ≥ 0.75
 - IMGT numbering: required
@@ -266,7 +266,7 @@ asyncio.run(main())
 |------|---------|------------|
 | MMseqs2 | Sequence clustering | [GitHub](https://github.com/soedinglab/MMseqs2) |
 | AbNumber | IMGT numbering | [GitHub](https://github.com/prihoda/AbNumber) |
-| AbnatiV v2 | Nativeness scoring | [GitLab](https://gitlab.developers.cam.ac.uk/ch/sormanni/abnativ) |
+| IgBlast | Nativeness/humanness scoring | [NCBI](https://ftp.ncbi.nih.gov/blast/executables/igblast/release/) |
 | promb | Humanness scoring | [GitHub](https://github.com/MSDLLCpapers/promb) |
 | TNP | Developability profiling | [GitHub](https://github.com/oxpig/TNP) |
 
