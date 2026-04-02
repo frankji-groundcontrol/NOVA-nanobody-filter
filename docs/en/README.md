@@ -60,12 +60,13 @@ Implementation plan for a modular nanobody challenge submission system in Python
 | Metric | Threshold | Tool |
 |--------|-----------|------|
 | IMGT Numbering | Successfully numbered | abnumber |
-| Nativeness Score | >= 0.80 | AbnatiV v2 |
-| Humanness Score | >= 0.75 | AbnatiV v2 |
+| Nativeness Score | >= 0.80 | IgBLAST-based VHH nativeness (internal) |
+| Humanness Score | >= 0.75 | IgBLAST-based human framework (internal) |
 
 * **Core Operations:**
   * **abnumber:** Keep only sequences successfully numbered under IMGT schema.
-  * **AbnatiV v2:** 
+  * **IgBLAST-based scoring (`metanano.utils.igblast_nativeness`):**
+    * Uses vendored `igblastp` (camelid V and human V databases) to compute VHH nativeness and human framework similarity.
     * Nativeness threshold: `nativeness_score >= 0.80`
     * Humanness threshold: `humanness_score >= 0.75`
   * **Optional Cross-Check:** Validate humanness with [promb](https://github.com/MSDLLCpapers/promb) (OASis score) for additional verification.
@@ -139,7 +140,7 @@ NOVA-nanobody-filter/
     ├── filters/                # Filter implementations (synchronous)
     │   ├── __init__.py
     │   ├── diversity.py        # Diversity filter (MMseqs2, k-mer, mutations)
-    │   ├── nativeness.py       # Nativeness filter (abnumber, AbnatiV)
+    │   ├── nativeness.py       # Nativeness filter (abnumber, IgBLAST-based nativeness/humanness)
     │   └── developability.py   # Developability filter (TNP, Red Region)
     ├── services/               # Async service layer (wraps filters)
     │   ├── __init__.py
@@ -187,7 +188,7 @@ NOVA-nanobody-filter/
         │   ├── test_tnp.py     # TNP wrapper tests (12 tests)
         │   ├── test_mmseqs2.py # MMseqs2 wrapper tests (11 tests)
         │   ├── test_abnumber.py # abnumber/CDR extraction tests (15 tests)
-        │   ├── test_abnativ.py  # AbnatiV v2 scoring tests (12 tests)
+        │   ├── test_igblast_nativeness.py  # IgBLAST nativeness/humanness tests (12 tests)
         │   ├── test_promb.py    # promb/OASis humanness tests (16 tests)
         │   └── test_datasketch.py # datasketch/MinHash tests (18 tests)
         └── routes/             # API route integration tests (58 tests)
@@ -393,8 +394,8 @@ async def validate_sequence(sequence_input: Sequence) -> ValidationResponse:
 
 2. **Nativeness Validation:**
    * Sequence is numbered using the **abnumber** tool under IMGT schema.
-   * The nativeness score is calculated using **AbnatiV v2** (threshold: >= 0.80).
-   * The humanness score is calculated (threshold: >= 0.75).
+   * The nativeness score is calculated using an **IgBLAST-based VHH nativeness heuristic** (threshold: >= 0.80).
+   * The humanness score is calculated using an **IgBLAST-based human framework heuristic** (threshold: >= 0.75).
    * Optional: Cross-check with **promb** (OASis humanness score).
 
 3. **Developability Validation:**
@@ -460,7 +461,7 @@ config.developability.negative_charge_patches.threshold # 1.88
 config.async_config.max_concurrent_validations  # 10 (overall pipeline)
 config.async_config.max_concurrent_tnp          # 4  (TNP CLI calls)
 config.async_config.max_concurrent_mmseqs2      # 2  (MMseqs2 clustering)
-config.async_config.max_concurrent_abnativ      # 4  (AbnatiV scoring)
+config.async_config.max_concurrent_abnativ      # 4  (IgBLAST nativeness scoring)
 config.async_config.max_concurrent_promb        # 4  (promb humanness)
 
 # Batch processing settings
@@ -641,7 +642,7 @@ print(f"Details: {result.details}")
 |---------|---------|------------|
 | `mmseqs2` | Sequence clustering for diversity filter | [GitHub](https://github.com/soedinglab/MMseqs2) |
 | `abnumber` | IMGT numbering for nanobody sequences | [GitHub](https://github.com/prihoda/AbNumber) |
-| `abnativ` | Nativeness and humanness scoring (AbnatiV v2) | [GitLab](https://gitlab.developers.cam.ac.uk/ch/sormanni/abnativ) |
+| `igblast` (vendored) | Backend for VHH nativeness and human framework heuristics | [IgBLAST docs](https://ncbi.github.io/igblast/) |
 | `promb` | Optional humanness cross-validation (OASis score) | [GitHub](https://github.com/MSDLLCpapers/promb) |
 | `tnp` | Therapeutic Nanobody Profiler for developability | [GitHub](https://github.com/oxpig/TNP) |
 | `datasketch` | Weighted MinHash for similarity calculations | [GitHub](https://github.com/ekzhu/datasketch) |
@@ -683,21 +684,13 @@ conda activate metanano
 python -m pytest metanano/tests/tools/ -v
 
 # Run specific tool tests
-python -m pytest metanano/tests/tools/test_tnp.py -v       # TNP (12 tests)
-python -m pytest metanano/tests/tools/test_mmseqs2.py -v   # MMseqs2 (11 tests)
-python -m pytest metanano/tests/tools/test_abnumber.py -v  # abnumber (15 tests)
-python -m pytest metanano/tests/tools/test_abnativ.py -v   # AbnatiV v2 (12 tests)
-python -m pytest metanano/tests/tools/test_promb.py -v     # promb (16 tests)
-python -m pytest metanano/tests/tools/test_datasketch.py -v # datasketch (18 tests)
+python -m pytest metanano/tests/tools/test_tnp.py -v                 # TNP (12 tests)
+python -m pytest metanano/tests/tools/test_mmseqs2.py -v             # MMseqs2 (11 tests)
+python -m pytest metanano/tests/tools/test_abnumber.py -v            # abnumber (15 tests)
+python -m pytest metanano/tests/tools/test_igblast_nativeness.py -v  # IgBLAST nativeness (12 tests)
+python -m pytest metanano/tests/tools/test_promb.py -v               # promb (16 tests)
+python -m pytest metanano/tests/tools/test_datasketch.py -v          # datasketch (18 tests)
 ```
-
-**Note:** For AbnatiV v2 tests, you need to download the models first:
-
-```bash
-abnativ init
-```
-
-This downloads pre-trained models (~5.8GB) from Zenodo to `~/.abnativ/models/pretrained_models/`.
 
 ### **8.3 Run Route Tests**
 
@@ -760,7 +753,7 @@ All external tools have been integrated with Python wrappers and comprehensive t
 | **TNP** | 12 | `utils/tnp_wrapper.py` | Developability profiling (CLI wrapper) |
 | **MMseqs2** | 11 | `utils/mmseqs2_wrapper.py` | Sequence clustering (CLI wrapper) |
 | **abnumber** | 15 | `utils/cdr_utils.py` | IMGT numbering and CDR extraction |
-| **AbnatiV v2** | 12 | `filters/nativeness.py` | Nativeness/humanness scoring |
+| **IgBLAST nativeness** | 12 | `utils/igblast_nativeness.py` | Nativeness/humanness scoring backend |
 | **promb** | 16 | `filters/nativeness.py` | OASis humanness scoring |
 | **datasketch** | 18 | `utils/similarity.py` | Weighted MinHash similarity |
 | **Total** | **84** | | All tool tests passing |
@@ -795,7 +788,7 @@ if mmseqs2.is_available():
 |------|-------------|------------|
 | **MMseqs2** | Ultra-fast sequence clustering and searching | [GitHub](https://github.com/soedinglab/MMseqs2) |
 | **AbNumber** | Antibody numbering using IMGT, Chothia, Kabat schemes | [GitHub](https://github.com/prihoda/AbNumber) |
-| **AbnatiV** | Antibody nativeness validation (v2) | [GitLab](https://gitlab.developers.cam.ac.uk/ch/sormanni/abnativ) |
+| **IgBLAST** | Immunoglobulin V(D)J alignment and annotation engine | [IgBLAST docs](https://ncbi.github.io/igblast/) |
 | **BioPhi** | Antibody design and humanization platform | [GitHub](https://github.com/Merck/BioPhi) |
 | **promb** | Protein humanness evaluation toolkit (OASis successor) | [GitHub](https://github.com/MSDLLCpapers/promb) |
 | **TNP** | Therapeutic Nanobody Profiler for developability | [GitHub](https://github.com/oxpig/TNP) |
@@ -810,9 +803,9 @@ if mmseqs2.is_available():
   * Supports IMGT, Chothia, Kabat, and other numbering schemes
   * Validates nanobody sequence structure
 
-* **AbnatiV v2** - Antibody nativeness validation
-  * Evaluates whether sequences belong to natural antibody families
-  * Provides nativeness and humanness scores
+* **IgBLAST** - Immunoglobulin V(D)J alignment and annotation
+  * Provides IMGT-aligned FR/CDR regions for VHH sequences
+  * Serves as the backend for IgBLAST-based VHH nativeness and human framework heuristics
 
 * **BioPhi** - Antibody design platform
   * Comprehensive humanization and design tools
@@ -873,12 +866,12 @@ Each resource-intensive operation has a dedicated semaphore:
 | `validation_semaphore` | 10 | Overall pipeline concurrency |
 | `tnp_semaphore` | 4 | TNP CLI subprocess calls |
 | `mmseqs2_semaphore` | 2 | MMseqs2 clustering (I/O heavy) |
-| `abnativ_semaphore` | 4 | AbnatiV model inference |
+| `abnativ_semaphore` | 4 | IgBLAST nativeness scoring tasks (not used, kept for backward compatibility) |
 | `promb_semaphore` | 4 | promb humanness scoring |
 
 ### **11.3 GPU Scheduler**
 
-For GPU-bound tasks (e.g., AbnatiV scoring), the GPU scheduler provides:
+For GPU-bound tasks (e.g., future deep-learning-based scoring), the GPU scheduler provides:
 
 * **Smart GPU Selection:**
   * Avoids re-using the last GPU (for load distribution)
@@ -916,7 +909,7 @@ For GPU-bound tasks (e.g., AbnatiV scoring), the GPU scheduler provides:
 
 ```python
 # Example: Running a GPU-bound task
-result = await gpu_scheduler.run_on_gpu(compute_abnativ_score, sequence)
+result = await gpu_scheduler.run_on_gpu(some_gpu_bound_function, sequence)
 # gpu_index is automatically injected into the function
 ```
 

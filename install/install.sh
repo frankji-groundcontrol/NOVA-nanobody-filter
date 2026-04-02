@@ -31,7 +31,7 @@ set -e  # Exit on error / 出错时退出
 
 # Suppress conda plugin warnings (e.g., menuinst)
 # 抑制 conda 插件警告（如 menuinst）
-export CONDA_NO_PLUGINS=true
+#export CONDA_NO_PLUGINS=true # disabled for now to avoid issues with conda-libmamba-solver
 
 # Get script directory / 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -500,6 +500,155 @@ if [ -x "$CONDA_PREFIX/bin/mkdssp" ] && [ ! -e "$CONDA_PREFIX/bin/dssp" ]; then
     log_info "创建 dssp 符号链接 (mkdssp -> dssp)..."
     ln -s $CONDA_PREFIX/bin/mkdssp $CONDA_PREFIX/bin/dssp 2>/dev/null || true
 fi
+
+# =============================================================================
+# Install IgBLAST binaries from NCBI (databases are pre-built in the repo on ../custom_data)
+# 从 NCBI 安装 IgBLAST 二进制文件（数据库已预构建在仓库中）
+# =============================================================================
+# IgBLAST version / IgBLAST 版本
+IGBLAST_VERSION="1.22.0"
+
+# Where IgBLAST binaries will be installed / IgBLAST 二进制文件安装位置
+IGBLAST_INSTALL_DIR="$CONDA_PREFIX/share/igblast"
+
+# Repo-local custom data (pre-built databases + internal_data for camelids)
+# 仓库本地自定义数据（预构建数据库 + 骆驼科 internal_data）
+IGBLAST_REPO_DATA="$(dirname "$SCRIPT_DIR")/custom_data"
+
+#   Expected structure / 预期结构:
+#     data/igblast/
+#       database/          ← pre-built .ndb/.nhr/.nin/.nsq/... files
+#       internal_data/     ← custom organism dirs (e.g. camelid/)
+#       optional_file/     ← optional: custom auxiliary files
+
+if [ ! -x "$IGBLAST_INSTALL_DIR/bin/igblastn" ]; then
+    log_header "Installing IgBLAST ${IGBLAST_VERSION} / 安装 IgBLAST ${IGBLAST_VERSION}"
+
+    # Detect platform / 检测平台
+    IGBLAST_OS=$(uname -s)
+    IGBLAST_ARCH=$(uname -m)
+
+    case "${IGBLAST_OS}-${IGBLAST_ARCH}" in
+        Linux-x86_64)
+            IGBLAST_PLATFORM="x64-linux"
+            ;;
+        Linux-aarch64)
+            IGBLAST_PLATFORM="aarch64-linux"
+            ;;
+        Darwin-x86_64)
+            IGBLAST_PLATFORM="x64-macosx"
+            ;;
+        Darwin-arm64)
+            IGBLAST_PLATFORM="universal-macosx"
+            ;;
+        *)
+            log_error "Unsupported platform: ${IGBLAST_OS}-${IGBLAST_ARCH}"
+            log_error "不支持的平台: ${IGBLAST_OS}-${IGBLAST_ARCH}"
+            exit 1
+            ;;
+    esac
+
+    IGBLAST_TARBALL="ncbi-igblast-${IGBLAST_VERSION}-${IGBLAST_PLATFORM}.tar.gz"
+    IGBLAST_URL="https://ftp.ncbi.nih.gov/blast/executables/igblast/release/${IGBLAST_VERSION}/${IGBLAST_TARBALL}"
+
+    IGBLAST_TMP=$(mktemp -d)
+    log_info "Downloading IgBLAST ${IGBLAST_VERSION} for ${IGBLAST_PLATFORM}..."
+    log_info "正在下载 IgBLAST ${IGBLAST_VERSION} (${IGBLAST_PLATFORM})..."
+
+    if curl -fSL --retry 3 --retry-delay 5 -o "$IGBLAST_TMP/$IGBLAST_TARBALL" "$IGBLAST_URL"; then
+        log_info "Extracting IgBLAST..."
+        log_info "解压 IgBLAST..."
+        tar xzf "$IGBLAST_TMP/$IGBLAST_TARBALL" -C "$IGBLAST_TMP"
+
+        # The tarball extracts to ncbi-igblast-<version>/
+        mv "$IGBLAST_TMP/ncbi-igblast-${IGBLAST_VERSION}" "$IGBLAST_TMP/igblast"
+        IGBLAST_EXTRACTED="$IGBLAST_TMP/igblast"
+
+        # Install to CONDA_PREFIX/share/igblast
+        # 安装到 CONDA_PREFIX/share/igblast
+        mkdir -p "$IGBLAST_INSTALL_DIR"
+        cp -r "$IGBLAST_EXTRACTED/bin/" "$IGBLAST_INSTALL_DIR/"
+
+        # Copy NCBI's default internal_data as the base layer
+        # 复制 NCBI 默认 internal_data 作为基础层
+        cp -r "$IGBLAST_EXTRACTED/internal_data" "$IGBLAST_INSTALL_DIR/"
+
+        # Copy NCBI's optional_file if present
+        # 如果存在，复制 NCBI 的 optional_file
+        if [ -d "$IGBLAST_EXTRACTED/optional_file" ]; then
+            cp -r "$IGBLAST_EXTRACTED/optional_file" "$IGBLAST_INSTALL_DIR/"
+        fi
+
+        # ── Overlay repo-local custom data on top of NCBI defaults ──
+        # ── 将仓库本地自定义数据覆盖到 NCBI 默认数据之上 ──
+
+        # 1. Merge custom internal_data (e.g. camelid organism dirs)
+        if [ -d "$IGBLAST_REPO_DATA/igblast_internal_data" ]; then
+            log_info "Merging custom internal_data from repo..."
+            log_info "合并仓库中的自定义 internal_data..."
+            cp -r "$IGBLAST_REPO_DATA/igblast_internal_data/"* "$IGBLAST_INSTALL_DIR/internal_data/"
+        fi
+
+        # 2. Overlay custom optional_file if present
+        #    覆盖自定义 optional_file（如果存在）
+        if [ -d "$IGBLAST_REPO_DATA/igblast_optional_file" ]; then
+            log_info "Merging custom optional_file from repo..."
+            log_info "合并仓库中的自定义 optional_file..."
+            mkdir -p "$IGBLAST_INSTALL_DIR/optional_file"
+            cp -r "$IGBLAST_REPO_DATA/igblast_optional_file/"* "$IGBLAST_INSTALL_DIR/optional_file/"
+        fi
+
+        # 3. Create symlinks for binaries on PATH
+        #    在 PATH 上为二进制文件创建符号链接
+        for bin in igblastn igblastp makeblastdb; do
+            if [ -f "$IGBLAST_INSTALL_DIR/bin/$bin" ]; then
+                ln -sf "$IGBLAST_INSTALL_DIR/bin/$bin" "$CONDA_PREFIX/bin/$bin"
+            fi
+        done
+
+        rm -rf "$IGBLAST_TMP"
+        log_success "IgBLAST ${IGBLAST_VERSION} installed successfully!"
+        log_success "IgBLAST ${IGBLAST_VERSION} 安装成功！"
+    else
+        log_error "Failed to download IgBLAST from $IGBLAST_URL"
+        log_error "从 $IGBLAST_URL 下载 IgBLAST 失败"
+        rm -rf "$IGBLAST_TMP"
+        exit 1
+    fi
+else
+    log_info "IgBLAST already installed, skipping..."
+    log_info "IgBLAST 已安装，跳过..."
+
+    # Still overlay custom data in case it was updated in the repo
+    # 仍然覆盖自定义数据，以防仓库中有更新
+    if [ -d "$IGBLAST_REPO_DATA/igblast_internal_data" ]; then
+        cp -r "$IGBLAST_REPO_DATA/internal_data/"* "$IGBLAST_INSTALL_DIR/internal_data/" 2>/dev/null || true
+    fi
+    if [ -d "$IGBLAST_REPO_DATA/optional_file" ]; then
+        mkdir -p "$IGBLAST_INSTALL_DIR/igblast_optional_file"
+        cp -r "$IGBLAST_REPO_DATA/igblast_optional_file/"* "$IGBLAST_INSTALL_DIR/igblast_optional_file/" 2>/dev/null || true
+    fi
+    if [ -d "$IGBLAST_REPO_DATA/igblast_database" ]; then
+        cp -r "$IGBLAST_REPO_DATA/igblast_database/"* "$IGBLAST_INSTALL_DIR/database/" 2>/dev/null || true
+    fi
+fi
+
+# ── Set IgBLAST environment variables ──
+# ── 设置 IgBLAST 环境变量 ──
+
+# IGDATA tells igblastn where to find internal_data/ and optional_file/
+# IGDATA 告诉 igblastn 在哪里找到 internal_data/ 和 optional_file/
+export IGDATA="$IGBLAST_INSTALL_DIR"
+
+# IGBLAST_DB points to the pre-built germline databases in the repo
+# IGBLAST_DB 指向仓库中预构建的种系数据库
+export IGBLAST_DB="$IGBLAST_REPO_DATA/database"
+
+conda env config vars set IGDATA="$IGBLAST_INSTALL_DIR" -n $ENV_NAME 2>/dev/null || true
+conda env config vars set IGBLAST_DB="$IGBLAST_REPO_DATA/database" -n $ENV_NAME 2>/dev/null || true
+
+log_info "IGDATA: $IGDATA"
+log_info "IGBLAST_DB: $IGBLAST_DB"
 
 log_header "Installation complete! / 安装完成！"
 

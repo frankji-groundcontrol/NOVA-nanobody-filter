@@ -207,8 +207,8 @@ class AbnumberConfig(BaseModel):
 
 class AbnativConfig(BaseModel):
     """
-    AbnatiV v2 scoring configuration.
-    AbnatiV v2 评分配置。
+    Nativeness/humanness scoring configuration (IgBLAST-based).
+    基于 IgBLAST 的天然性/人源性评分配置。
 
     Consumers / 调用方:
         - metanano/filters/nativeness.py
@@ -274,7 +274,8 @@ class NativenessConfig(BaseModel):
     )
     abnativ_v2: AbnativConfig = Field(
         default_factory=AbnativConfig,
-        description="AbnatiV v2 scoring settings. / AbnatiV v2 评分设置。",
+        description="Nativeness/humanness scoring settings (IgBLAST-based). / "
+        "天然性/人源性评分设置（基于 IgBLAST）。",
     )
     promb: PrombConfig = Field(
         default_factory=PrombConfig,
@@ -487,8 +488,8 @@ class AsyncConfig(BaseModel):
         default=4,
         ge=1,
         le=16,
-        description="Maximum concurrent AbnatiV scoring calls (GPU-aware). / "
-        "最大并发 AbnatiV 评分调用数（GPU 感知）。",
+        description="Maximum concurrent nativeness scoring calls (reserved). / "
+        "天然性评分的最大并发调用数（保留字段）。",
     )
     max_concurrent_promb: int = Field(
         default=4,

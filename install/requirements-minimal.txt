@@ -29,9 +29,6 @@ wheel
 # biopython（>=1.81 需要用于 Python 3.12 兼容性）
 biopython==1.86
 
-# AbnatiV v2: Nativeness scoring / 天然性评分
-git+https://gitlab.developers.cam.ac.uk/ch/sormanni/abnativ.git@da4a2e93a8e56a2409a565afaee6b82527ea6876
-
 # openmm
 openmm[cuda12]
 
@@ -57,3 +54,6 @@ pytest>=7.0.0
 pytest-asyncio>=0.21.0
 requests>=2.28.0
 httpx>=0.24.0
+
+# Bittensor - integration with NOVA
+bittensor==9.9.0

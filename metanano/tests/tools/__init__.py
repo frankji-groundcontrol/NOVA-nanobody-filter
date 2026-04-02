@@ -15,7 +15,7 @@ Overview / 概述:
         - TNP (Therapeutic Nanobody Profiler)
         - MMseqs2 (Sequence Clustering)
         - abnumber (IMGT Numbering)
-        - AbnatiV v2 (Nativeness Scoring)
+        - IgBLAST-based nativeness scoring
         - promb (OASis Humanness)
         - datasketch (MinHash Similarity)
 

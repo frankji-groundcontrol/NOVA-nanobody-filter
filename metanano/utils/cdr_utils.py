@@ -17,6 +17,7 @@ Consumers / 调用方:
 
 from typing import Dict, Optional, Tuple
 
+import bittensor as bt
 
 def extract_cdrs(sequence: str) -> Optional[Dict[str, str]]:
     """
@@ -52,7 +53,8 @@ def extract_cdrs(sequence: str) -> Optional[Dict[str, str]]:
             "cdr2": str(chain.cdr2_seq) if chain.cdr2_seq else "",
             "cdr3": str(chain.cdr3_seq) if chain.cdr3_seq else "",
         }
-    except Exception:
+    except Exception as e:
+        bt.logging.warning(f"Error extracting CDRs: {e}")
         return None
 
 

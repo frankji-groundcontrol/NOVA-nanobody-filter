@@ -116,7 +116,7 @@ chain_type = chain.chain_type  # 'H' for heavy chain
 
 ---
 
-### 0.4 AbnatiV v2 (Nativeness Scoring) ✅
+### 0.4 AbnatiV v2 (Nativeness Scoring) ✅ - superseded by IgBLAST nativeness
 
 | Phase | Task | Status | Notes |
 |-------|------|--------|-------|

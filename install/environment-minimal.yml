@@ -51,6 +51,7 @@ dependencies:
   - cuda-toolkit=12.8.1
 
   # Core bioinformatics tools / 核心生物信息学工具
+  # igblast is vendored in metanano to include custom camelid database
   - mmseqs2                    # Sequence clustering / 序列聚类
   - abnumber                   # IMGT numbering / IMGT 编号
   - datasketch                 # MinHash similarity / MinHash 相似度
