@@ -32,10 +32,11 @@ plan:
     status: completed
   - step: Publish the verified change as a pull request
     owner: codex
-    status: in_progress
+    status: completed
 main:
   outcome: "Developability requires TNP criteria and both whole-VHH A3D caps, using one prediction"
   owner: codex
-  status: active
-  next_evidence: "Combined gates passed: 165 tests, 58 skipped; 17 isolated tests; 118 links and 19 indexed documents. Publish the reviewed commits and record the PR URL"
+  status: completed
+  pull_request: "https://github.com/frankji-groundcontrol/NOVA-nanobody-filter/pull/4"
+  next_evidence: "PR 4 is open with A3D gates, reviewed PR 3 diagnostics, TNP integration repairs and author credit; serving-host native installation and predictor-backed verification remain operator actions"
 side_tracks: []

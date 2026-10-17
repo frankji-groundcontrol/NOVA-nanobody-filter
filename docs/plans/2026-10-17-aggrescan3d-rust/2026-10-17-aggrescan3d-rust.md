@@ -34,6 +34,6 @@ The combined change also incorporates the reviewed TNP diagnostics from PR #3 at
 - Fresh round-trip native output passes independent upstream parity. All 160 regenerated fixture rows match, both recovered policy caps match configuration, and formatting, shell syntax, diff whitespace, 96 added local links/anchors, 16 new-document incoming links, folder guides, English additions and tracker/history parsing pass. The source workspace remains unchanged.
 - A3D checks are enabled by default under Developability; see the [operator guide](../../usage/aggrescan3d-rust.md) for installation and configuration. Publication is tracked in the durable state.
 - Verification limits and the existing Python dependency-resolution issue are recorded in the [changelog](../../changelogs/2026-10-17-aggrescan3d-rust.md) and [development ledger](../../en/TODO.md).
-- Native A3D implementation and TNP integration repairs pass their focused checks. Next: close combined verification and publish the requested PR, then install native tools on serving hosts and run predictor-backed checks.
+- Published [PR #4](https://github.com/frankji-groundcontrol/NOVA-nanobody-filter/pull/4) with the native A3D integration, reviewed PR #3 diagnostics and TNP boundary/API repairs. The PR description thanks the PR #3 author and the TNP repair commit includes co-author credit. Next operator action: review the PR, install native tools on serving hosts and run predictor-backed checks.
 
 State: [durable tracker](2026-10-17-aggrescan3d-rust.track.yaml). Parent: [plan index](../README.md).
