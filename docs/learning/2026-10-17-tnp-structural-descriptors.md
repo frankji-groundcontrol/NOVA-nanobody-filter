@@ -1,0 +1,15 @@
+# Structural descriptors from TNP output — 2026-10-17
+
+Pinned TNP revision `29dcac72f1380e8538e8870f45a699d3c6156162` writes its hydrogen-stripped model to `Final_Models/<name>_NanoBodyBuilder2_Model.pdb`. NOVA removes that directory when `TNPWrapper._run_once` returns. A downstream structural descriptor must consume the model inside that lifetime; returning a temporary path for a later service call loses the input.
+
+The working integration runs the native descriptor after successful TNP JSON parsing and before cleanup. Developability's registered A3D subfilter consumes that profile. Its shared `analyze_profile` method applies the same TNP/A3D combination for sync and async callers. Descriptor failures remain explicit and do not trigger another expensive prediction. Tests verify single invocation, cleanup and failure attribution to Developability while preserving valid TNP metrics.
+
+For scientific portability, preserve the exact sequence join, source-model hash, coordinate-preserving normalization hash and pinned accessibility implementation. The installed FreeSASA 2.0.1 plus native Rust scoring reproduced all 160 upstream fixture rows exactly and matched an independent saved-output audit within `4.44e-16` per residue. A different installed FreeSASA version is not evidence of numerical parity.
+
+Signed averages can conceal localized positive scores: the checked helper example `[-8, 4, 0, 2]` has mean `-0.5` and normalized positive burden `1.5`. Regional reporting should select centers from full-VHH scores and normalize by the selected count, including zero-valued members. Cropping the structure first changes the underlying calculation. Upstream zero-skipping positive AUC and positive score sum have different definitions; report them separately.
+
+Fixed numeric gates also require consistent serialization precision and method settings. The native summary now writes round-trip score decimals; filter checks use Decimal comparisons and return the exact threshold and decision for each cap. Boundary tests include equality and differences of `1e-15`. Successful calculation status and a passing screening decision are separate: a valid high score has `status=ok, passed=false`; unavailable or incompatible scoring has `status=error, passed=false`.
+
+Evidence: [filter checks](../../metanano/tests/test_aggrescan3d.py), [integration checks](../../metanano/tests/utils/test_aggrescan3d_integration.py), [metric helper checks](../../tools/aggrescan3d-rs/tests/metrics.rs), [upstream harness](../../tools/aggrescan3d-rs/tools/upstream_parity.py) and [verified change record](../changelogs/2026-10-17-aggrescan3d-rust.md).
+
+Parent: [learning index](README.md). Next: use this handoff pattern when adding another structural descriptor.

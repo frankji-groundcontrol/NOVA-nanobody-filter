@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from metanano.config import DevelopabilityConfig
+from metanano.filters.aggrescan3d import Aggrescan3DFilter
+from metanano.utils.aggrescan3d_wrapper import Aggrescan3DWrapper
 from metanano.utils.tnp_wrapper import TNPWrapper
 
 
@@ -70,6 +72,7 @@ class DevelopabilityResult:
     negative_charge_patches: Optional[float] = None
     red_flags: Optional[List[str]] = None
     reason: Optional[str] = None
+    aggrescan3d: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary. / 转换为字典。"""
@@ -90,6 +93,8 @@ class DevelopabilityResult:
             result["red_flags"] = self.red_flags
         if self.reason:
             result["reason"] = self.reason
+        if self.aggrescan3d is not None:
+            result["aggrescan3d"] = self.aggrescan3d
         return result
 
 
@@ -104,6 +109,9 @@ class DevelopabilityFilter:
 
     Red Region: Sequences are REJECTED if ANY property falls in the Red Region.
     红区：如果任一属性落在红区内，则序列被拒绝。
+
+    Enabled Aggrescan3D mean and peak caps must also pass. Scoring errors fail
+    Developability while preserving TNP measurements and explicit A3D details.
 
     Example / 示例:
         >>> config = DevelopabilityConfig()
@@ -131,7 +139,13 @@ class DevelopabilityFilter:
             - metanano/utils/tnp_wrapper.py: TNPWrapper
         """
         self.config = config
-        self._tnp = TNPWrapper()
+        aggrescan3d = config.aggrescan3d
+        self._aggrescan3d = Aggrescan3DFilter(aggrescan3d)
+        scorer = (
+            Aggrescan3DWrapper(aggrescan3d.executable, aggrescan3d.freesasa_executable).profile
+            if aggrescan3d.enabled else None
+        )
+        self._tnp = TNPWrapper(aggrescan3d=scorer)
 
     def compute_tnp_profile(self, sequence: str) -> Optional[Dict[str, Any]]:
         """
@@ -296,9 +310,24 @@ class DevelopabilityFilter:
                 "无法计算 TNP 分析结果。",
             )
 
-        # Check Red Region criteria (rejection conditions)
-        # 检查红区标准（拒绝条件）
+        return self.analyze_profile(sequence, profile)
+
+    def analyze_profile(self, sequence: str, profile: Dict[str, Any]) -> DevelopabilityResult:
+        """Combine TNP criteria and A3D caps for sync and async callers.
+
+        Consume an existing TNP profile without another prediction. A3D details
+        include the cap decisions or explicit scoring errors. See
+        docs/usage/aggrescan3d-rust.md and tests/test_aggrescan3d.py.
+        """
         passed, red_flags = self.check_red_region(profile)
+        reasons = list(red_flags)
+        aggregation = None
+        if self.config.aggrescan3d.enabled:
+            result = self._aggrescan3d.analyze(sequence, profile.get("aggrescan3d"))
+            aggregation = result.details
+            passed = passed and result.passed
+            if result.reason:
+                reasons.append(result.reason)
 
         return DevelopabilityResult(
             passed=passed,
@@ -309,5 +338,6 @@ class DevelopabilityFilter:
             positive_charge_patches=profile.get("positive_charge_patches"),
             negative_charge_patches=profile.get("negative_charge_patches"),
             red_flags=red_flags if red_flags else None,
-            reason="; ".join(red_flags) if red_flags else None,
+            reason="; ".join(reasons) if reasons else None,
+            aggrescan3d=aggregation,
         )

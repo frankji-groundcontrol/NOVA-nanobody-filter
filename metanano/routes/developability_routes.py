@@ -52,8 +52,7 @@ class DevelopabilityResponse(BaseModel):
 
     passed: bool = Field(
         ...,
-        description="Whether sequence passed (no Red Region criteria triggered). / "
-        "序列是否通过（无红区标准被触发）。",
+        description="Whether the sequence passed TNP criteria and enabled Aggrescan3D caps.",
     )
     total_cdr_length: Optional[int] = Field(
         default=None,
@@ -91,14 +90,17 @@ class DevelopabilityResponse(BaseModel):
         default=None,
         description="Failure reason if not passed. / 未通过时的失败原因。",
     )
+    aggrescan3d: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Aggrescan3D scores, cap decisions and provenance within Developability.",
+    )
 
 
 @router.post(
     "/analyze",
     response_model=DevelopabilityResponse,
     summary="Analyze Sequence Developability / 分析序列可开发性",
-    description="Check if sequence meets therapeutic developability requirements (Red Region criteria). / "
-    "检查序列是否满足治疗可开发性要求（红区标准）。",
+    description="Check TNP Red Region criteria and enabled whole-VHH Aggrescan3D mean and peak caps.",
 )
 async def analyze_developability(request: DevelopabilityRequest) -> DevelopabilityResponse:
     """
@@ -134,6 +136,7 @@ class TNPProfileResponse(BaseModel):
     positive_charge_patches: Optional[float] = None
     negative_charge_patches: Optional[float] = None
     flags: Optional[Dict[str, str]] = None
+    aggrescan3d: Optional[Dict[str, Any]] = None
 
 
 @router.post(
@@ -163,6 +166,7 @@ async def get_tnp_profile(request: TNPProfileRequest) -> TNPProfileResponse:
             positive_charge_patches=result.get("positive_charge_patches"),
             negative_charge_patches=result.get("negative_charge_patches"),
             flags=result.get("flags"),
+            aggrescan3d=result.get("aggrescan3d"),
         )
     except Exception as e:
         raise HTTPException(

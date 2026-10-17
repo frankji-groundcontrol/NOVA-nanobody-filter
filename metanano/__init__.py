@@ -11,9 +11,7 @@ Overview / 概述:
     MetaNano - NOVA 纳米抗体挑战赛提交过滤系统。
 
     This package provides a modular nanobody validation pipeline with three
-    cascading filters: Diversity, Nativeness, and Developability.
-    该包提供模块化的纳米抗体验证流水线，包含三个级联过滤器：
-    多样性、天然性和可开发性。
+    cascading filters: Diversity, Nativeness, and Developability (TNP + Aggrescan3D).
 
 Consumers / 调用方:
     - app.py: Main application entry point / 主应用入口

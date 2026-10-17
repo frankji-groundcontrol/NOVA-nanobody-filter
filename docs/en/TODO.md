@@ -23,6 +23,12 @@ For each external tool, we follow a systematic 3-phase approach:
 
 ## 0. External Tool Integration 🚧
 
+### Aggrescan3D Rust integration — 2026-10-17 ✅
+
+The [registered A3D subfilter](../usage/aggrescan3d-rust.md) is part of Developability. It reuses TNP's final model and requires both fixed whole-VHH mean and peak caps by default, alongside TNP criteria. It includes configuration, filter exports, sync/async and batch validation, existing developability APIs, reusable regional functions and original paper citations. Native regression, Python API and independent upstream numerical checks pass; see the [dated evidence and verification limits](../changelogs/2026-10-17-aggrescan3d-rust.md). Serving hosts need the native Rust/FreeSASA installation for the default policy.
+
+Known environment follow-up: a fresh Bittensor 9.9.0 resolution selected `async-substrate-interface==2.2.1` and hit a `cyscale`/`scalecodec` namespace conflict. Local verification used 1.5.4. Review the existing dependency constraints separately; native integration changes do not alter them.
+
 ### 0.1 TNP (Therapeutic Nanobody Profiler) ✅
 
 | Phase | Task | Status | Notes |

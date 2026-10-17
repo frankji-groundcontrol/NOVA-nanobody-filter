@@ -14,13 +14,14 @@ Overview / 概述:
     该包包含以下核心过滤逻辑：
         - Diversity: MMseqs2 clustering and k-mer similarity
         - Nativeness: IMGT numbering and nativeness/humanness scoring
-        - Developability: TNP profiling and Red Region validation
+        - Developability: TNP Red Regions and Aggrescan3D whole-VHH mean/peak caps
 
 Consumers / 调用方:
     - metanano/validators/*.py
     - metanano/pipeline.py
 """
 
+from metanano.filters.aggrescan3d import Aggrescan3DFilter
 from metanano.filters.developability import DevelopabilityFilter
 from metanano.filters.diversity import DiversityFilter
 from metanano.filters.nativeness import NativenessFilter
@@ -29,6 +30,7 @@ __all__ = [
     "DiversityFilter",
     "NativenessFilter",
     "DevelopabilityFilter",
+    "Aggrescan3DFilter",
 ]
 
 

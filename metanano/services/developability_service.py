@@ -150,25 +150,8 @@ class DevelopabilityService:
                 "reason": "Failed to compute TNP profile. / 无法计算 TNP 分析结果。",
             }
 
-        # Check Red Region criteria
-        # 检查红区标准
-        passed, red_flags = await self.check_red_region_async(profile)
-
-        result: Dict[str, Any] = {
-            "passed": passed,
-            "total_cdr_length": profile.get("total_cdr_length"),
-            "cdr3_length": profile.get("cdr3_length"),
-            "cdr3_compactness": profile.get("cdr3_compactness"),
-            "surface_hydrophobic_patches": profile.get("surface_hydrophobic_patches"),
-            "positive_charge_patches": profile.get("positive_charge_patches"),
-            "negative_charge_patches": profile.get("negative_charge_patches"),
-            "flags": profile.get("flags"),
-        }
-
-        if red_flags:
-            result["red_flags"] = red_flags
-            result["reason"] = "; ".join(red_flags)
-
+        result = self._filter.analyze_profile(sequence, profile).to_dict()
+        result["flags"] = profile.get("flags")
         return result
 
     async def analyze_batch_async(

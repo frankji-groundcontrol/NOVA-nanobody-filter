@@ -46,7 +46,7 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -105,6 +105,7 @@ class TNPResult(BaseModel):
         description="Flag colors for each property (green/yellow/red) / "
         "每个属性的标志颜色（绿色/黄色/红色）",
     )
+    aggrescan3d: Optional[Dict[str, Any]] = None
 
     def to_profile_dict(self) -> Dict[str, Any]:
         """
@@ -115,7 +116,7 @@ class TNPResult(BaseModel):
             Dict[str, Any]: Profile dictionary with standard keys.
                 具有标准键的 profile 字典。
         """
-        return {
+        profile = {
             "total_cdr_length": self.total_cdr_length,
             "cdr3_length": self.cdr3_length,
             "cdr3_compactness": self.cdr3_compactness,
@@ -124,6 +125,9 @@ class TNPResult(BaseModel):
             "negative_charge_patches": self.pnc,
             "flags": self.flags,
         }
+        if self.aggrescan3d is not None:
+            profile["aggrescan3d"] = self.aggrescan3d
+        return profile
 
 
 class TNPWrapper:
@@ -146,6 +150,7 @@ class TNPWrapper:
         tnp_executable: str = "TNP",
         temp_dir: Optional[Path] = None,
         max_attempts: int = 3,
+        aggrescan3d: Optional[Callable[[str, Path], Dict[str, Any]]] = None,
     ) -> None:
         """
         Initialize the TNP wrapper.
@@ -165,6 +170,7 @@ class TNPWrapper:
         self.temp_dir = temp_dir
         self.max_attempts = max(1, int(max_attempts))
         self._last_error = "unknown"
+        self.aggrescan3d = aggrescan3d
 
     def _check_tnp_available(self) -> bool:
         """
@@ -300,6 +306,11 @@ class TNPWrapper:
             if parsed is None:
                 self._last_error = "TNP exited cleanly but wrote no usable profile"
                 logger.warning("TNP attempt %d: %s", attempt, self._last_error)
+            elif self.aggrescan3d is not None:
+                structure = (
+                    output_dir / "Final_Models" / f"{seq_name}_NanoBodyBuilder2_Model.pdb"
+                )
+                parsed.aggrescan3d = self.aggrescan3d(sequence, structure)
             return parsed
 
     @staticmethod

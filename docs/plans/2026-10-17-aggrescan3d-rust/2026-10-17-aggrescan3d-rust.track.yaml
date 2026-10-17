@@ -1,0 +1,32 @@
+version: 2
+task: "Register native Aggrescan3D within NOVA's Developability filter"
+coordinator: codex
+history_file: 2026-10-17-aggrescan3d-rust.track.history.jsonl
+plan:
+  - step: Establish the native integration acceptance check
+    owner: codex
+    status: completed
+  - step: Integrate the Rust scorer and propagate results
+    owner: codex
+    status: completed
+  - step: Verify the native path and close documentation
+    owner: codex
+    status: completed
+  - step: Add reusable VHH metric helpers and document whole-chain and regional review
+    owner: codex
+    status: completed
+  - step: Integrate the registered A3D subfilter and both caps within Developability
+    owner: codex
+    status: completed
+  - step: Verify rejection, boundary precision, failure handling and documentation
+    owner: codex
+    status: completed
+  - step: Publish the verified change as a pull request
+    owner: codex
+    status: in_progress
+main:
+  outcome: "Developability requires TNP criteria and both whole-VHH A3D caps, using one prediction"
+  owner: codex
+  status: active
+  next_evidence: "Fresh verification of the committed tree, feature branch push and GitHub pull request URL"
+side_tracks: []
