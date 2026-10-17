@@ -279,6 +279,8 @@ Aggrescan3D method: Zambrano et al. (2015), *AGGRESCAN3D (A3D): server for predi
 
 - [Documentation Index](docs/README.md) - Technical guides, usage, dated changes, plans and verified lessons
 - [Aggrescan3D Rust Integration](docs/usage/aggrescan3d-rust.md) - Registered filter, whole-VHH/region metrics, reusable functions, provenance and paper citation
+- [TNP Integration](docs/usage/tnp-integration.md) - Complete-profile recovery, correlated diagnostics and compute-error fields
+- [Isolated TNP Tests](tests/README.md) - Run wrapper/service checks without GPU or application dependencies
 - [Development Plans](docs/plans/README.md) - Current integration scope and durable verification state
 - [English Documentation](docs/en/README.md) - Full technical documentation
 - [Search Quickstart](docs/en/SEARCH_QUICKSTART.md) - Fast start for indexing and async search

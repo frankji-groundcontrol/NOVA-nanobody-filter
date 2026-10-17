@@ -10,6 +10,8 @@ Signed averages can conceal localized positive scores: the checked helper exampl
 
 Fixed numeric gates also require consistent serialization precision and method settings. The native summary now writes round-trip score decimals; filter checks use Decimal comparisons and return the exact threshold and decision for each cap. Boundary tests include equality and differences of `1e-15`. Successful calculation status and a passing screening decision are separate: a valid high score has `status=ok, passed=false`; unavailable or incompatible scoring has `status=error, passed=false`.
 
+TNP's output boundary must establish a complete finite measurement before running structural descriptors. Defaulting absent descriptors to zero turns unavailable data into apparent measurements; accepting NaN also defeats ordinary range comparisons. Recovery tests now require recomputation after invalid output and verify that only the successful attempt reaches A3D. HTTP response schemas must explicitly retain compute-error fields, or callers lose the distinction even when the service returns it. See the [TNP repair record](../changelogs/2026-10-17-tnp-integration-repair.md).
+
 Evidence: [filter checks](../../metanano/tests/test_aggrescan3d.py), [integration checks](../../metanano/tests/utils/test_aggrescan3d_integration.py), [metric helper checks](../../tools/aggrescan3d-rs/tests/metrics.rs), [upstream harness](../../tools/aggrescan3d-rs/tools/upstream_parity.py) and [verified change record](../changelogs/2026-10-17-aggrescan3d-rust.md).
 
 Parent: [learning index](README.md). Next: use this handoff pattern when adding another structural descriptor.

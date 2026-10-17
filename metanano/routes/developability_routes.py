@@ -15,7 +15,7 @@ Consumers / 调用方:
     - app.py
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -54,6 +54,9 @@ class DevelopabilityResponse(BaseModel):
         ...,
         description="Whether the sequence passed TNP criteria and enabled Aggrescan3D caps.",
     )
+    error: bool = Field(default=False, description="Whether computation failed before a TNP profile was available.")
+    error_kind: Optional[Literal["no_profile", "timeout", "profile_exception"]] = None
+    sequence_sha256: Optional[str] = None
     total_cdr_length: Optional[int] = Field(
         default=None,
         description="Total CDR length (valid: 20-39). / 总 CDR 长度（有效：20-39）。",

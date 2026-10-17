@@ -29,6 +29,8 @@ The [registered A3D subfilter](../usage/aggrescan3d-rust.md) is part of Developa
 
 Known environment follow-up: a fresh Bittensor 9.9.0 resolution selected `async-substrate-interface==2.2.1` and hit a `cyscale`/`scalecodec` namespace conflict. Local verification used 1.5.4. Review the existing dependency constraints separately; native integration changes do not alter them.
 
+TNP integration defects are repaired: complete finite measurements are required, invalid output is recomputed, correlated diagnostics replace shared error state, and compute-error metadata survives HTTP validation. See the [repair evidence](../changelogs/2026-10-17-tnp-integration-repair.md) and [operator guide](../usage/tnp-integration.md).
+
 ### 0.1 TNP (Therapeutic Nanobody Profiler) ✅
 
 | Phase | Task | Status | Notes |

@@ -165,7 +165,7 @@ After installing the native tools and project test dependencies:
 
 ```sh
 cargo test --locked --manifest-path tools/aggrescan3d-rs/Cargo.toml
-python -m pytest metanano/tests/test_aggrescan3d.py metanano/tests/utils -q
+python -m pytest tests metanano/tests/test_aggrescan3d.py metanano/tests/utils -q
 ```
 
 [Integration tests](../../metanano/tests/utils/test_aggrescan3d_integration.py) exercise actual Rust/FreeSASA scoring, source preservation, invalid structures, sequence mismatches, subprocess errors, summary validation, sync/async rejection within Developability, batch validation, explicit disablement and the full application's developability route. They stub the expensive TNP predictor with synthetic full-heavy-atom models and verify one prediction per sequence. [Filter tests](../../metanano/tests/test_aggrescan3d.py) check inclusive decimal boundaries, both required caps, method compatibility, missing/non-finite measurements and preservation of TNP rejection. Native tests skip explicitly if `.tools/bin` has not been built. Existing native fixtures independently compare all 20 amino acids with pinned upstream scores. [Metric helper tests](../../tools/aggrescan3d-rs/tests/metrics.rs) cover normalization, signed cancellation, zero-anchored maxima, full/partial masks, invalid inputs and overflow; Rust documentation examples are also executable tests.

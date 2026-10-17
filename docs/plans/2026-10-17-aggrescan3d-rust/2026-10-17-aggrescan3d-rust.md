@@ -8,6 +8,8 @@ Reuse the existing MIT Rust port and numerical fixtures. Register Aggrescan3D wi
 
 Document native metric meanings and whole-VHH versus regional inspection, and provide public reusable Rust functions over full-VHH scores and caller-supplied masks. Regional descriptors remain annotations; only whole-VHH mean and peak enforce the A3D decision.
 
+The combined change also incorporates the reviewed TNP diagnostics from PR #3 at `e912789` and repairs the profile/API integration boundary. Require all six finite descriptors, recompute invalid attempts, preserve error kind/digest in HTTP responses and keep A3D attached to the validated attempt. [TNP repair evidence](../../changelogs/2026-10-17-tnp-integration-repair.md) records the failing regressions and integration limits.
+
 ## Reach and dependencies
 
 - Native crate, pinned FreeSASA build and installation instructions.
@@ -26,11 +28,12 @@ Document native metric meanings and whole-VHH versus regional inspection, and pr
 - Fresh Rust/FreeSASA installation, a real native scoring path and a full-application HTTP smoke test pass.
 - Focused Python checks: 58 passed, including native A3D pass/reject decisions within Developability, missing scoring, TNP rejection, decimal boundaries and sync/async/batch API paths. External-tool tests require AbNumber, absent from the local environment.
 - Final Python core suite: 145 passed, 58 skipped, excluding the external-tool directory.
+- Combined A3D/TNP integration suite: 165 passed, 58 skipped. The 17 isolated tests also pass with plugin autoload disabled; 118 added links/anchors, 19 new-document indexes, English additions, folder guides and state parsing pass.
 - Native suite: 17 tests and two doctests pass. The unmodified upstream core reproduces all 160 fixture rows exactly; an independent saved-output audit agrees within `4.44e-16` per residue and matches all five summaries at four decimals.
 - One final review confirmed caller/result propagation and preservation of the native numerical core, validation, license and locked dependencies.
 - Fresh round-trip native output passes independent upstream parity. All 160 regenerated fixture rows match, both recovered policy caps match configuration, and formatting, shell syntax, diff whitespace, 96 added local links/anchors, 16 new-document incoming links, folder guides, English additions and tracker/history parsing pass. The source workspace remains unchanged.
 - A3D checks are enabled by default under Developability; see the [operator guide](../../usage/aggrescan3d-rust.md) for installation and configuration. Publication is tracked in the durable state.
 - Verification limits and the existing Python dependency-resolution issue are recorded in the [changelog](../../changelogs/2026-10-17-aggrescan3d-rust.md) and [development ledger](../../en/TODO.md).
-- Local implementation is complete. Next operator action: install native tools on serving hosts and run predictor-backed checks.
+- Native A3D implementation and TNP integration repairs pass their focused checks. Next: close combined verification and publish the requested PR, then install native tools on serving hosts and run predictor-backed checks.
 
 State: [durable tracker](2026-10-17-aggrescan3d-rust.track.yaml). Parent: [plan index](../README.md).
