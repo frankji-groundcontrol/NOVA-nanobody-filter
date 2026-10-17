@@ -35,11 +35,11 @@ plan:
     status: completed
   - step: Harden the shared deadline and cancellation cleanup in PR 4
     owner: codex
-    status: in_progress
+    status: completed
 main:
-  outcome: "Developability requires TNP criteria and both whole-VHH A3D caps, using one prediction"
+  outcome: "Developability requires TNP criteria and both whole-VHH A3D caps, with one prediction, shared deadlines and process cleanup"
   owner: codex
-  status: active
+  status: completed
   pull_request: "https://github.com/frankji-groundcontrol/NOVA-nanobody-filter/pull/4"
-  next_evidence: "180 core tests pass with 58 skips; 23 isolated checks and documentation gates pass. Commit, push and verify PR 4 retains the author acknowledgment"
+  next_evidence: "PR 4 contains verified hardening commit dc9f638 and retains thanks to the PR 3 author. Review the PR and run predictor-backed timeout/cancellation checks on a serving host before rollout"
 side_tracks: []

@@ -10,4 +10,6 @@ The focused Python suite passes 69 tests, including real subprocess trees that i
 
 These tests use surrogate predictor/scorer processes and actual installed Rust/FreeSASA where applicable. GPU-backed TNP prediction remains unverified on this host. The external-tool test directory is excluded because AbNumber is unavailable. Native Rust sources are unchanged from the previously verified checkpoint of 17 tests and two doctests.
 
+Published hardening commit `dc9f638` to PR #4. Verified the GitHub head against the local commit and the updated PR description against its prepared text, including the PR #3 author acknowledgment. The PR remains open and non-draft; GitHub reports no status-check runs.
+
 This builds on the [TNP integration repair](2026-10-17-tnp-integration-repair.md). The PR description retains thanks to @thomasvangurp for PR #3. Usage: [deadline and cancellation policy](../usage/tnp-integration.md#shared-deadline-and-cancellation). Tests: [isolated suite](../../tests/README.md). State: [owned tracker](../plans/2026-10-17-aggrescan3d-rust/2026-10-17-aggrescan3d-rust.track.yaml). Parent: [changelog index](README.md). Next: verify the same timeout/cancellation behavior with the installed predictor on a serving host.
