@@ -10,6 +10,8 @@ Document native metric meanings and whole-VHH versus regional inspection, and pr
 
 The combined change also incorporates the reviewed TNP diagnostics from PR #3 at `e912789` and repairs the profile/API integration boundary. Require all six finite descriptors, recompute invalid attempts, preserve error kind/digest in HTTP responses and keep A3D attached to the validated attempt. [TNP repair evidence](../../changelogs/2026-10-17-tnp-integration-repair.md) records the failing regressions and integration limits.
 
+The deadline follow-up shares one budget across queueing, retries and native scoring. Timeout/cancellation terminate the owned process group, reap the direct child and finish worker cleanup before releasing the semaphore. Deadline exhaustion returns a typed compute error and sequence digest through single/batch/profile endpoints.
+
 ## Reach and dependencies
 
 - Native crate, pinned FreeSASA build and installation instructions.
@@ -29,6 +31,7 @@ The combined change also incorporates the reviewed TNP diagnostics from PR #3 at
 - Focused Python checks: 58 passed, including native A3D pass/reject decisions within Developability, missing scoring, TNP rejection, decimal boundaries and sync/async/batch API paths. External-tool tests require AbNumber, absent from the local environment.
 - Final Python core suite: 145 passed, 58 skipped, excluding the external-tool directory.
 - Combined A3D/TNP integration suite: 165 passed, 58 skipped. The 17 isolated tests also pass with plugin autoload disabled; 118 added links/anchors, 19 new-document indexes, English additions, folder guides and state parsing pass.
+- Deadline hardening: 180 core tests passed with 58 skips, 69 focused checks passed and 23 isolated tests passed. Real process trees verify termination, reaping and repeated cancellation; queue and shared TNP/A3D budgets and typed HTTP timeout responses pass. Documentation/state gates pass with 130 added links/anchors and 20 new documents indexed.
 - Native suite: 17 tests and two doctests pass. The unmodified upstream core reproduces all 160 fixture rows exactly; an independent saved-output audit agrees within `4.44e-16` per residue and matches all five summaries at four decimals.
 - One final review confirmed caller/result propagation and preservation of the native numerical core, validation, license and locked dependencies.
 - Fresh round-trip native output passes independent upstream parity. All 160 regenerated fixture rows match, both recovered policy caps match configuration, and formatting, shell syntax, diff whitespace, 96 added local links/anchors, 16 new-document incoming links, folder guides, English additions and tracker/history parsing pass. The source workspace remains unchanged.

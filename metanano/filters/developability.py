@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 from metanano.config import DevelopabilityConfig
 from metanano.filters.aggrescan3d import Aggrescan3DFilter
 from metanano.utils.aggrescan3d_wrapper import Aggrescan3DWrapper
-from metanano.utils.tnp_wrapper import TNPWrapper
+from metanano.utils.tnp_wrapper import ProfileExecution, TNPWrapper
 
 
 @dataclass
@@ -147,7 +147,9 @@ class DevelopabilityFilter:
         )
         self._tnp = TNPWrapper(aggrescan3d=scorer)
 
-    def compute_tnp_profile(self, sequence: str) -> Optional[Dict[str, Any]]:
+    def compute_tnp_profile(
+        self, sequence: str, *, execution: Optional[ProfileExecution] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Compute TNP profile for the sequence using TNP CLI.
         使用 TNP CLI 计算序列的 TNP 分析结果。
@@ -167,7 +169,7 @@ class DevelopabilityFilter:
         Consumers / 调用方:
             - DevelopabilityFilter.analyze
         """
-        result = self._tnp.profile(sequence)
+        result = self._tnp.profile(sequence, execution=execution)
         if result is None:
             return None
         return result.to_profile_dict()

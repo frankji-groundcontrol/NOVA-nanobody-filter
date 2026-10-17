@@ -41,11 +41,14 @@ Consumers / 调用方:
 import json
 import hashlib
 import logging
+import math
 import re
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -69,6 +72,72 @@ _TRACEBACK_COMPONENTS = {
     "sequence_checks.py": "immunebuilder_sequence_checks",
     "anarci.py": "anarci",
 }
+
+
+class ProfileExecution:
+    """Share one deadline and cancellation signal across TNP and native scoring.
+
+    Each command owns a POSIX process group. Cleanup terminates descendants,
+    escalates after a short grace period and reaps the direct child before return.
+    See docs/usage/tnp-integration.md and tests/test_tnp_deadline.py.
+    """
+
+    def __init__(self, timeout: float = 300.0) -> None:
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Profiling timeout must be finite and positive")
+        self.deadline = time.monotonic() + timeout
+        self._cancelled = threading.Event()
+
+    def remaining(self) -> float:
+        remaining = self.deadline - time.monotonic()
+        if self._cancelled.is_set() or remaining <= 0:
+            raise TimeoutError("Profiling deadline exceeded or execution cancelled")
+        return remaining
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+    def run(self, command: list[str], *, timeout: float) -> subprocess.CompletedProcess:
+        """Capture a command within the remaining budget; always stop its tree."""
+        timeout = min(timeout, self.remaining())
+        deadline = time.monotonic() + timeout
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True,
+        )
+        output = errors = None
+        try:
+            while True:
+                remaining = min(deadline - time.monotonic(), self.remaining())
+                if remaining <= 0:
+                    raise TimeoutError
+                try:
+                    output, errors = process.communicate(timeout=min(0.05, remaining))
+                except subprocess.TimeoutExpired as error:
+                    output, errors = error.output, error.stderr
+                    continue
+                self.remaining()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError
+                return subprocess.CompletedProcess(command, process.returncode, output, errors)
+        except TimeoutError:
+            raise subprocess.TimeoutExpired(command, timeout, output=output, stderr=errors) from None
+        finally:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                pass
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            process.stdout.close()
+            process.stderr.close()
 
 
 class TNPResult(BaseModel):
@@ -170,7 +239,7 @@ class TNPWrapper:
         tnp_executable: str = "TNP",
         temp_dir: Optional[Path] = None,
         max_attempts: int = 3,
-        aggrescan3d: Optional[Callable[[str, Path], Dict[str, Any]]] = None,
+        aggrescan3d: Optional[Callable[[str, Path, ProfileExecution], Dict[str, Any]]] = None,
     ) -> None:
         """
         Initialize the TNP wrapper.
@@ -202,7 +271,10 @@ class TNPWrapper:
         """
         return shutil.which(self.tnp_executable) is not None
 
-    def profile(self, sequence: str, name: Optional[str] = None) -> Optional[TNPResult]:
+    def profile(
+        self, sequence: str, name: Optional[str] = None,
+        *, execution: Optional[ProfileExecution] = None,
+    ) -> Optional[TNPResult]:
         """
         Run TNP profiling on a sequence.
         对序列运行 TNP 分析。
@@ -212,6 +284,8 @@ class TNPWrapper:
                 纳米抗体氨基酸序列。
             name (Optional[str]): Name for the sequence. If None, generates UUID.
                 序列的名称。如果为 None，生成 UUID。
+            execution: Shared deadline/cancellation context. Defaults to one
+                300-second budget for every attempt and native scoring together.
 
         Returns / 返回:
             Optional[TNPResult]: TNP result or None if profiling failed.
@@ -226,6 +300,7 @@ class TNPWrapper:
         Consumers / 调用方:
             - metanano/filters/developability.py: DevelopabilityFilter.compute_tnp_profile
         """
+        execution = execution or ProfileExecution()
         started = time.monotonic()
         context = {
             "schema": 1,
@@ -250,14 +325,25 @@ class TNPWrapper:
         # TNP 将结构预测委托给 GPU 上的 NanoBodyBuilder2（ImmuneBuilder），
         # 它可能出现瞬时故障。这是主机当时的状态问题，而非序列的问题：
         # 同一序列在重试时可以正常分析。
-        for attempt in range(1, self.max_attempts + 1):
-            result = self._run_once(sequence, name, attempt, context=context)
-            if result is not None:
-                self._diagnostic(context, event="profile_succeeded", attempt=attempt,
-                                 elapsed_s=round(time.monotonic() - started, 3))
-                return result
+        last_attempt = 0
+        try:
+            for attempt in range(1, self.max_attempts + 1):
+                timeout = min(300.0, execution.remaining())
+                last_attempt = attempt
+                result = self._run_once(
+                    sequence, name, attempt, timeout=timeout, context=context, execution=execution,
+                )
+                execution.remaining()
+                if result is not None:
+                    self._diagnostic(context, event="profile_succeeded", attempt=attempt,
+                                     elapsed_s=round(time.monotonic() - started, 3))
+                    return result
+        except TimeoutError:
+            self._diagnostic(context, event="profile_exhausted", attempt=last_attempt,
+                             categories=["timeout"], elapsed_s=round(time.monotonic() - started, 3))
+            return None
 
-        self._diagnostic(context, event="profile_exhausted", attempt=self.max_attempts,
+        self._diagnostic(context, event="profile_exhausted", attempt=last_attempt,
                          elapsed_s=round(time.monotonic() - started, 3))
         return None
 
@@ -312,7 +398,7 @@ class TNPWrapper:
         sequence: str,
         name: Optional[str],
         attempt: int,
-        *, timeout: float = 300.0,
+        *, execution: ProfileExecution, timeout: float = 300.0,
         context: Optional[Dict[str, Any]] = None,
     ) -> Optional[TNPResult]:
         """
@@ -355,13 +441,8 @@ class TNPWrapper:
             ]
 
             try:
-                completed = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=timeout,
-                )
+                completed = execution.run(cmd, timeout=timeout)
+                completed.check_returncode()
             except subprocess.CalledProcessError as e:
                 categories = self._failure_categories(e.stdout, e.stderr)
                 self._diagnostic(context, event="attempt_failed", attempt=attempt,
@@ -404,7 +485,9 @@ class TNPWrapper:
                     structure = (
                         output_dir / "Final_Models" / f"{seq_name}_NanoBodyBuilder2_Model.pdb"
                     )
-                    parsed.aggrescan3d = self.aggrescan3d(sequence, structure)
+                    execution.remaining()
+                    parsed.aggrescan3d = self.aggrescan3d(sequence, structure, execution)
+                execution.remaining()
                 self._diagnostic(context, event="attempt_succeeded", attempt=attempt,
                                  returncode=completed.returncode,
                                  elapsed_s=round(time.monotonic() - started, 3))

@@ -1,0 +1,13 @@
+# TNP deadline hardening — 2026-10-17
+
+Previously, an asynchronous request could time out while its worker continued up to three separate 300-second TNP attempts, releasing the semaphore before computation stopped. This follow-up in [PR #4](https://github.com/frankji-groundcontrol/NOVA-nanobody-filter/pull/4) gives each profile one shared deadline across queueing, retries, parsing and A3D. Defaults are 300 seconds overall, at most three TNP attempts, and a 60-second native scoring cap within the remaining budget.
+
+Timeout and cancellation terminate the owned POSIX process group, escalate from SIGTERM to SIGKILL after up to 0.2 seconds, and reap the direct child. The service waits for worker cleanup before releasing its semaphore slot, including repeated cancellation. Queued expiry cannot start computation or release another request's slot. A result arriving after the shared deadline cannot become a valid profile. Cleanup adds overhead beyond the compute deadline.
+
+Single and batch Developability analysis return a typed `timeout` compute error with the sequence digest. The direct TNP-profile endpoint also preserves timeout/no-profile kinds and digests. Ordinary A3D scoring failures before the overall deadline continue to preserve valid TNP metrics without repeating prediction. TNP/A3D numerical methods, caps and the three-stage pipeline are unchanged.
+
+The focused Python suite passes 69 tests, including real subprocess trees that ignore SIGTERM, cancellation while cleanup is active, queue expiry, total retry exhaustion, shared A3D budgets and HTTP timeout responses. The combined core suite passes 180 tests with 58 skips; the isolated suite passes 23 tests with plugin autoload disabled. Whitespace, 130 added local links/anchors, 20 new-document indexes, English additions, folder guides and tracker/history parsing pass.
+
+These tests use surrogate predictor/scorer processes and actual installed Rust/FreeSASA where applicable. GPU-backed TNP prediction remains unverified on this host. The external-tool test directory is excluded because AbNumber is unavailable. Native Rust sources are unchanged from the previously verified checkpoint of 17 tests and two doctests.
+
+This builds on the [TNP integration repair](2026-10-17-tnp-integration-repair.md). The PR description retains thanks to @thomasvangurp for PR #3. Usage: [deadline and cancellation policy](../usage/tnp-integration.md#shared-deadline-and-cancellation). Tests: [isolated suite](../../tests/README.md). State: [owned tracker](../plans/2026-10-17-aggrescan3d-rust/2026-10-17-aggrescan3d-rust.track.yaml). Parent: [changelog index](README.md). Next: verify the same timeout/cancellation behavior with the installed predictor on a serving host.

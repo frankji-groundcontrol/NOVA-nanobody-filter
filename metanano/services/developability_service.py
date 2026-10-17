@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from metanano.config import DevelopabilityConfig
 from metanano.filters.developability import DevelopabilityFilter, DevelopabilityResult
 from metanano.services.async_manager import AsyncServiceManager, get_service_manager
+from metanano.utils.tnp_wrapper import ProfileExecution
 
 
 class DevelopabilityService:
@@ -93,14 +94,31 @@ class DevelopabilityService:
         Returns / 返回:
             Optional[Dict[str, Any]]: TNP profile or None if failed.
         """
-        await self.manager.initialize()
-        async with self.manager.tnp_semaphore:
-            # Preserve execution/deadline policy in this diagnostic follow-up.
-            # Thread cancellation and shared retry budgets need separate review.
-            return await asyncio.wait_for(
-                asyncio.to_thread(self._filter.compute_tnp_profile, sequence),
-                timeout=self.manager.task_timeout,
-            )
+        execution = ProfileExecution(self.manager.task_timeout)
+        await asyncio.wait_for(self.manager.initialize(), timeout=execution.remaining())
+        semaphore = self.manager.tnp_semaphore
+        await asyncio.wait_for(semaphore.acquire(), timeout=execution.remaining())
+        try:
+            worker = asyncio.create_task(asyncio.to_thread(
+                self._filter.compute_tnp_profile, sequence, execution=execution,
+            ))
+            try:
+                profile = await asyncio.wait_for(asyncio.shield(worker), timeout=execution.remaining())
+                execution.remaining()
+                return profile
+            finally:
+                execution.cancel()
+                while not worker.done():
+                    try:
+                        await asyncio.shield(worker)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not worker.cancelled():
+                    worker.exception()
+        finally:
+            semaphore.release()
 
     async def check_red_region_async(
         self,
@@ -131,11 +149,14 @@ class DevelopabilityService:
         Returns / 返回:
             Dict[str, Any]: Complete analysis result. / 完整的分析结果。
         """
-        await self.manager.initialize()
-
         # Compute TNP profile
         # 计算 TNP 分析结果
-        profile = await self.compute_tnp_profile_async(sequence)
+        error_kind = "no_profile"
+        try:
+            profile = await self.compute_tnp_profile_async(sequence)
+        except TimeoutError:
+            profile = None
+            error_kind = "timeout"
         if not profile:
             # No profile is a compute failure, not a measured developability
             # verdict. It may be host-, input-, model- or parser-dependent;
@@ -144,7 +165,7 @@ class DevelopabilityService:
             return {
                 "passed": False,
                 "error": True,
-                "error_kind": "no_profile",
+                "error_kind": error_kind,
                 "sequence_sha256": hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
                 "reason": "Failed to compute TNP profile.",
             }
@@ -167,8 +188,6 @@ class DevelopabilityService:
         Returns / 返回:
             List[Dict[str, Any]]: Results for each sequence. / 每个序列的结果。
         """
-        await self.manager.initialize()
-
         # Process in batches respecting semaphore limits
         # 按批次处理，遵守信号量限制
         batch_size = self.manager.batch_size

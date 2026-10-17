@@ -15,6 +15,7 @@ Consumers / 调用方:
     - app.py
 """
 
+import hashlib
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -54,7 +55,7 @@ class DevelopabilityResponse(BaseModel):
         ...,
         description="Whether the sequence passed TNP criteria and enabled Aggrescan3D caps.",
     )
-    error: bool = Field(default=False, description="Whether computation failed before a TNP profile was available.")
+    error: bool = Field(default=False, description="Whether computation failed before a complete profile was available.")
     error_kind: Optional[Literal["no_profile", "timeout", "profile_exception"]] = None
     sequence_sha256: Optional[str] = None
     total_cdr_length: Optional[int] = Field(
@@ -132,6 +133,8 @@ class TNPProfileResponse(BaseModel):
     """Response for TNP profiling. / TNP 分析响应。"""
 
     success: bool
+    error_kind: Optional[Literal["no_profile", "timeout"]] = None
+    sequence_sha256: Optional[str] = None
     total_cdr_length: Optional[int] = None
     cdr3_length: Optional[int] = None
     cdr3_compactness: Optional[float] = None
@@ -154,12 +157,14 @@ async def get_tnp_profile(request: TNPProfileRequest) -> TNPProfileResponse:
     Get TNP profile.
     获取 TNP 分析。
     """
+    sequence = request.sequence.strip().upper()
+    digest = hashlib.sha256(sequence.encode("utf-8")).hexdigest()
     try:
         result = await _service.compute_tnp_profile_async(
-            sequence=request.sequence.strip().upper(),
+            sequence=sequence,
         )
         if result is None:
-            return TNPProfileResponse(success=False)
+            return TNPProfileResponse(success=False, error_kind="no_profile", sequence_sha256=digest)
         return TNPProfileResponse(
             success=True,
             total_cdr_length=result.get("total_cdr_length"),
@@ -171,6 +176,8 @@ async def get_tnp_profile(request: TNPProfileRequest) -> TNPProfileResponse:
             flags=result.get("flags"),
             aggrescan3d=result.get("aggrescan3d"),
         )
+    except TimeoutError:
+        return TNPProfileResponse(success=False, error_kind="timeout", sequence_sha256=digest)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

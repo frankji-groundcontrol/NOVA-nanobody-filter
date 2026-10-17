@@ -10,4 +10,6 @@ The combined core suite passes 165 tests with 58 skips, excluding the external-t
 
 Published in [PR #4](https://github.com/frankji-groundcontrol/NOVA-nanobody-filter/pull/4). The PR description thanks @thomasvangurp for PR #3, and commit `a35ae64` records co-author credit.
 
+The subsequent [deadline hardening](2026-10-17-tnp-deadline-hardening.md) replaces the earlier timeout/cancellation policy described in this checkpoint with one shared budget and process cleanup before semaphore release.
+
 Usage and fields: [TNP guide](../usage/tnp-integration.md). Tests: [isolated suite](../../tests/README.md) and [profile recovery/API regressions](../../metanano/tests/utils/test_tnp_profile_validation.py). State: [owned integration plan](../plans/2026-10-17-aggrescan3d-rust/2026-10-17-aggrescan3d-rust.md). Parent: [changelog index](README.md).

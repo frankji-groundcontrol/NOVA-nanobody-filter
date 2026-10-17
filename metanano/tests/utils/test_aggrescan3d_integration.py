@@ -9,6 +9,8 @@ import hashlib
 import json
 import math
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -25,13 +27,15 @@ SEQUENCE = "GGGGGGGGGG"
 
 @pytest.fixture
 def tnp_output(monkeypatch, request):
+    from metanano.utils.tnp_wrapper import ProfileExecution, TNPWrapper
+
     calls = []
-    original_run = subprocess.run
+    original_run = ProfileExecution.run
     model_text = getattr(request, "param", "model fixture")
 
-    def run_tnp(command, **kwargs):
+    def run_tnp(self, command, **kwargs):
         if command[0] != "TNP":
-            return original_run(command, **kwargs)
+            return original_run(self, command, **kwargs)
         name = command[command.index("--name") + 1]
         directory = Path(command[command.index("--output") + 1])
         calls.append(directory)
@@ -55,9 +59,9 @@ def tnp_output(monkeypatch, request):
         (models / f"{name}_NanoBodyBuilder2_Model.pdb").write_text(model_text)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(tnp_module.subprocess, "run", run_tnp)
+    monkeypatch.setattr(tnp_module.ProfileExecution, "run", run_tnp)
+    monkeypatch.setattr(ProfileExecution, "run", run_tnp)
     monkeypatch.setattr(tnp_module.TNPWrapper, "_check_tnp_available", lambda self: True)
-    from metanano.utils.tnp_wrapper import TNPWrapper
     monkeypatch.setattr(TNPWrapper, "_check_tnp_available", lambda self: True)
     return calls
 
@@ -65,15 +69,17 @@ def tnp_output(monkeypatch, request):
 def test_scores_existing_tnp_model_before_temporary_cleanup(tnp_output):
     structures = []
     score = {"status": "ok", "a3d_average": -0.5}
+    execution = tnp_module.ProfileExecution(7)
 
-    def score_model(sequence, structure):
+    def score_model(sequence, structure, shared_execution):
+        assert shared_execution is execution
         assert sequence == SEQUENCE
         assert structure.read_text() == "model fixture"
         assert structure.parent.name == "Final_Models"
         structures.append(structure)
         return score
 
-    result = tnp_module.TNPWrapper(aggrescan3d=score_model).profile(SEQUENCE)
+    result = tnp_module.TNPWrapper(aggrescan3d=score_model).profile(SEQUENCE, execution=execution)
 
     assert result.to_profile_dict()["aggrescan3d"] == score
     assert len(tnp_output) == 1
@@ -84,7 +90,7 @@ def test_scores_existing_tnp_model_before_temporary_cleanup(tnp_output):
 def test_scoring_error_preserves_tnp_metrics_without_repeating_prediction(tnp_output):
     error = {"status": "error", "error": "Native scorer is unavailable"}
     result = tnp_module.TNPWrapper(
-        aggrescan3d=lambda sequence, structure: error
+        aggrescan3d=lambda sequence, structure, execution: error
     ).profile(SEQUENCE)
 
     profile = result.to_profile_dict()
@@ -98,6 +104,49 @@ def test_disabled_scoring_preserves_original_profile(tnp_output):
 
     assert "aggrescan3d" not in result.to_profile_dict()
     assert len(tnp_output) == 1
+
+
+def test_tnp_and_a3d_share_the_remaining_budget(monkeypatch, tnp_output):
+    clock = [0.0]
+    original_run = tnp_module.ProfileExecution.run
+
+    def run_tnp(self, command, **kwargs):
+        result = original_run(self, command, **kwargs)
+        clock[0] += 4
+        return result
+
+    def score_model(sequence, structure, execution):
+        assert execution.remaining() == 3
+        clock[0] += 4
+        return {"status": "ok"}
+
+    monkeypatch.setattr(tnp_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(tnp_module.ProfileExecution, "run", run_tnp)
+    execution = tnp_module.ProfileExecution(7)
+    result = tnp_module.TNPWrapper(aggrescan3d=score_model).profile(SEQUENCE, execution=execution)
+
+    assert result is None
+    assert len(tnp_output) == 1
+
+
+def test_native_scoring_obeys_shorter_shared_deadline(tmp_path):
+    from metanano.utils.aggrescan3d_wrapper import Aggrescan3DWrapper
+    from metanano.utils.tnp_wrapper import ProfileExecution
+
+    executable = tmp_path / "slow-scorer"
+    executable.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(30)\n")
+    executable.chmod(0o700)
+    structure = tmp_path / "input.pdb"
+    structure.write_text(synthetic_model())
+    execution = ProfileExecution(0.15)
+    started = time.monotonic()
+
+    result = Aggrescan3DWrapper(str(executable)).profile(SEQUENCE, structure, execution)
+
+    assert result["status"] == "error"
+    assert "remaining time budget" in result["error"]
+    assert "a3d_average" not in result
+    assert time.monotonic() - started < 2
 
 
 def synthetic_model(sequence=SEQUENCE):
@@ -185,13 +234,14 @@ def test_native_input_failures_are_explicit(tmp_path, native_config, failure):
 @pytest.mark.parametrize("failure", ["missing_binary", "timeout"])
 def test_native_execution_failures_are_explicit_errors(tmp_path, monkeypatch, failure):
     from metanano.utils.aggrescan3d_wrapper import Aggrescan3DWrapper
+    from metanano.utils.tnp_wrapper import ProfileExecution
 
     structure = tmp_path / "input.pdb"
     structure.write_text(synthetic_model())
     if failure == "timeout":
-        def timeout(command, **kwargs):
+        def timeout(self, command, **kwargs):
             raise subprocess.TimeoutExpired(command, 60)
-        monkeypatch.setattr(subprocess, "run", timeout)
+        monkeypatch.setattr(ProfileExecution, "run", timeout)
     result = Aggrescan3DWrapper(str(tmp_path / "missing-scorer")).profile(SEQUENCE, structure)
 
     assert result["status"] == "error"
@@ -212,11 +262,12 @@ def test_native_summary_identity_and_numbers_are_validated(
     tmp_path, monkeypatch, field, value, expected
 ):
     from metanano.utils.aggrescan3d_wrapper import Aggrescan3DWrapper
+    from metanano.utils.tnp_wrapper import ProfileExecution
 
     structure = tmp_path / "input.pdb"
     structure.write_text(synthetic_model())
 
-    def native_summary(command, **kwargs):
+    def native_summary(self, command, **kwargs):
         directory = Path(command[command.index("--out") + 1])
         directory.mkdir()
         row = {
@@ -235,7 +286,7 @@ def test_native_summary_identity_and_numbers_are_validated(
             writer.writerow(row)
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", native_summary)
+    monkeypatch.setattr(ProfileExecution, "run", native_summary)
     result = Aggrescan3DWrapper().profile(SEQUENCE, structure)
 
     assert result["status"] == "error"

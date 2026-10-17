@@ -27,7 +27,7 @@ python -m uvicorn metanano.app:app --port 5000
 
 The installer builds the [vendored Rust scorer](../../tools/aggrescan3d-rs/README.md) and **FreeSASA 2.0.1** from a pinned upstream revision. Downloads and binaries stay in gitignored `.tools/`. A different FreeSASA version fails explicitly.
 
-`AGGRESCAN3D_EXECUTABLE` and `FREESASA_EXECUTABLE` can specify absolute executable paths. Defaults are `aggrescan3d-rs` and `freesasa` on `PATH`. Set these variables before starting the server; invalid enable flags fail configuration validation. Native scoring has a 60-second subprocess timeout. Existing installations need the native build for the default Developability policy. `AGGRESCAN3D_ENABLED=false` explicitly disables A3D checks and leaves the TNP criteria active.
+`AGGRESCAN3D_EXECUTABLE` and `FREESASA_EXECUTABLE` can specify absolute executable paths. Defaults are `aggrescan3d-rs` and `freesasa` on `PATH`. Set these variables before starting the server; invalid enable flags fail configuration validation. Native scoring is capped at 60 seconds within the [shared Developability deadline](tnp-integration.md#shared-deadline-and-cancellation); timeout or cancellation terminates its process group, including FreeSASA. Existing installations need the native build for the default Developability policy. `AGGRESCAN3D_ENABLED=false` explicitly disables A3D checks and leaves the TNP criteria active.
 
 Programmatic configuration uses the same fields:
 
@@ -87,7 +87,7 @@ curl -X POST http://localhost:5000/developability/analyze \
 | `citation_doi` | `10.1093/nar/gkv359` |
 | `error` | Diagnostic text when scoring fails; numeric scores are omitted |
 
-A3D describes aggregation propensity of the supplied model. Scores are dimensionless; they are not an experimental solubility measurement. A failed A3D calculation preserves valid TNP metrics and does not trigger a second TNP prediction. When TNP itself fails, no A3D calculation is attempted.
+A3D describes aggregation propensity of the supplied model. Scores are dimensionless; they are not an experimental solubility measurement. A failed A3D calculation preserves valid TNP metrics and does not trigger a second TNP prediction, provided the shared computation deadline has not expired. Shared deadline exhaustion returns a compute error. When TNP itself fails, no A3D calculation is attempted.
 
 The API adapter returns summaries and removes temporary scoring files. For retained raw RSA output, residue scores and numbering maps, use the [native CLI](../../tools/aggrescan3d-rs/README.md). Only isolated, complete, standard-amino-acid heavy-atom PDB input is supported; multi-chain/models, alternate conformers, hydrogens and incomplete structures fail explicitly. Mutation scanning, FoldX and CABS dynamics are not implemented.
 

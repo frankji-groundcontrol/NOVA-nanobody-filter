@@ -13,7 +13,9 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+
+from metanano.utils.tnp_wrapper import ProfileExecution
 
 
 class Aggrescan3DWrapper:
@@ -27,8 +29,11 @@ class Aggrescan3DWrapper:
         self.executable = executable
         self.freesasa_executable = freesasa_executable
 
-    def profile(self, sequence: str, structure: Path) -> Dict[str, Any]:
+    def profile(
+        self, sequence: str, structure: Path, execution: Optional[ProfileExecution] = None,
+    ) -> Dict[str, Any]:
         """Return scored metrics or an explicit error; never refold."""
+        execution = execution or ProfileExecution(60)
         sequence_hash = hashlib.sha256(sequence.encode("utf-8")).hexdigest()
         result: Dict[str, Any] = {
             "status": "error",
@@ -48,7 +53,7 @@ class Aggrescan3DWrapper:
                 fasta = directory / "sequence.fasta"
                 fasta.write_text(f">{sequence_hash}\n{sequence}\n", encoding="utf-8")
                 summary = directory / "summary"
-                completed = subprocess.run(
+                completed = execution.run(
                     [
                         self.executable,
                         "--fasta", str(fasta),
@@ -57,10 +62,7 @@ class Aggrescan3DWrapper:
                         "--residue-out", str(directory / "residues"),
                         "--freesasa", self.freesasa_executable,
                     ],
-                    capture_output=True,
-                    text=True,
                     timeout=60,
-                    check=False,
                 )
                 output = summary / "aggrescan3d.csv"
                 rows = []
@@ -93,6 +95,7 @@ class Aggrescan3DWrapper:
                 }
                 if not all(math.isfinite(value) for value in metrics.values()):
                     raise ValueError("Native scorer returned a non-finite score")
+                execution.remaining()
                 result.update(
                     status="ok",
                     input_structure_sha256=structure_hash,
@@ -105,8 +108,8 @@ class Aggrescan3DWrapper:
                     mode=row["mode"],
                     **metrics,
                 )
-        except subprocess.TimeoutExpired:
-            result["error"] = "Aggrescan3D scoring timed out after 60 seconds"
+        except (subprocess.TimeoutExpired, TimeoutError):
+            result["error"] = "Aggrescan3D scoring exceeded its remaining time budget"
         except (OSError, ValueError, KeyError, csv.Error) as error:
             result["error"] = str(error)
         return result

@@ -72,7 +72,7 @@ def _run_with(failures, max_attempts):
     """
     state = {"calls": 0}
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(self, cmd, **kwargs):
         state["calls"] += 1
         seq_name = cmd[cmd.index("--name") + 1]
         output_dir = Path(cmd[cmd.index("--output") + 1])
@@ -84,14 +84,14 @@ def _run_with(failures, max_attempts):
         target.write_text(json.dumps(_profile_payload(seq_name)))
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    original_run, original_which = mod.subprocess.run, mod.shutil.which
-    mod.subprocess.run = fake_run
+    original_run, original_which = mod.ProfileExecution.run, mod.shutil.which
+    mod.ProfileExecution.run = fake_run
     mod.shutil.which = lambda _name: "/usr/bin/TNP"
     try:
         result = TNPWrapper(max_attempts=max_attempts).profile(SEQUENCE)
         return result, state["calls"]
     finally:
-        mod.subprocess.run = original_run
+        mod.ProfileExecution.run = original_run
         mod.shutil.which = original_which
 
 
@@ -138,7 +138,7 @@ def _events(caplog):
 def test_exit_zero_without_profile_preserves_safe_failure_categories(monkeypatch, caplog):
     calls = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(self, cmd, **kwargs):
         calls.append(cmd)
         # Ordinary test markers represent untrusted text, not credentials.
         return subprocess.CompletedProcess(
@@ -147,7 +147,7 @@ def test_exit_zero_without_profile_preserves_safe_failure_categories(monkeypatch
         )
 
     monkeypatch.setattr(mod.shutil, "which", lambda _: "/usr/bin/TNP")
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.ProfileExecution, "run", fake_run)
     assert TNPWrapper().profile(SEQUENCE) is None
     assert len(calls) == 3
     failed = [event for event in _events(caplog) if event["event"] == "attempt_failed"]
@@ -160,22 +160,24 @@ def test_exit_zero_without_profile_preserves_safe_failure_categories(monkeypatch
     assert SEQUENCE not in caplog.text
 
 
-def test_logging_preserves_existing_per_attempt_timeout(monkeypatch, caplog):
+def test_timeout_exhausts_the_shared_budget_without_restarting(monkeypatch, caplog):
     clock = [0.0]
     timeouts = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(self, cmd, **kwargs):
         timeout = kwargs["timeout"]
         timeouts.append(timeout)
         clock[0] += timeout
         raise subprocess.TimeoutExpired(cmd, timeout, output="UNTRUSTED_MARKER")
 
     monkeypatch.setattr(mod.shutil, "which", lambda _: "/usr/bin/TNP")
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.ProfileExecution, "run", fake_run)
     monkeypatch.setattr(mod.time, "monotonic", lambda: clock[0])
     assert TNPWrapper().profile(SEQUENCE) is None
-    assert timeouts == [300.0, 300.0, 300.0]
-    assert clock[0] == 900
+    assert timeouts == [300.0]
+    assert clock[0] == 300
+    assert _events(caplog)[-1]["attempt"] == 1
+    assert _events(caplog)[-1]["categories"] == ["timeout"]
     assert "UNTRUSTED_MARKER" not in caplog.text
 
 
@@ -191,7 +193,7 @@ def test_missing_executable_records_zero_attempts(monkeypatch, caplog):
 def test_parse_validation_failure_is_logged_and_retried(monkeypatch, caplog):
     calls = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(self, cmd, **kwargs):
         calls.append(cmd)
         name = cmd[cmd.index("--name") + 1]
         output = Path(cmd[cmd.index("--output") + 1])
@@ -201,7 +203,7 @@ def test_parse_validation_failure_is_logged_and_retried(monkeypatch, caplog):
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(mod.shutil, "which", lambda _: "/usr/bin/TNP")
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.ProfileExecution, "run", fake_run)
     assert TNPWrapper().profile(SEQUENCE) is None
     assert len(calls) == 3
     failed = [event for event in _events(caplog) if event["event"] == "attempt_failed"]
@@ -212,7 +214,7 @@ def test_concurrent_calls_have_independent_profile_ids(monkeypatch, caplog):
     from concurrent.futures import ThreadPoolExecutor
 
     monkeypatch.setattr(mod.shutil, "which", lambda _: "/usr/bin/TNP")
-    monkeypatch.setattr(mod.subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, 0, "", ""))
+    monkeypatch.setattr(mod.ProfileExecution, "run", lambda self, cmd, **_: subprocess.CompletedProcess(cmd, 0, "", ""))
     wrapper = TNPWrapper()
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(wrapper.profile, [SEQUENCE, SEQUENCE]))
@@ -235,11 +237,11 @@ def test_none_subscript_preserves_safe_traceback_locations(monkeypatch, caplog):
         "TypeError: 'NoneType' object is not subscriptable\n"
     )
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(self, cmd, **kwargs):
         raise subprocess.CalledProcessError(1, cmd, output="UNTRUSTED_STDOUT", stderr=trace)
 
     monkeypatch.setattr(mod.shutil, "which", lambda _: "/usr/bin/TNP")
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.ProfileExecution, "run", fake_run)
     assert TNPWrapper().profile(SEQUENCE) is None
     failures = [event for event in _events(caplog) if event["event"] == "attempt_failed"]
     assert [event["attempt"] for event in failures] == [1, 2, 3]
@@ -259,7 +261,7 @@ def test_traceback_locations_accept_stdout_bytes_and_bound_count():
 def test_cli_null_profile_is_retried_as_compute_error(monkeypatch, caplog):
     calls = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(self, cmd, **kwargs):
         calls.append(cmd)
         name = cmd[cmd.index("--name") + 1]
         output = Path(cmd[cmd.index("--output") + 1])
@@ -268,7 +270,7 @@ def test_cli_null_profile_is_retried_as_compute_error(monkeypatch, caplog):
         return subprocess.CompletedProcess(cmd, 0, "UNTRUSTED_MARKER", "")
 
     monkeypatch.setattr(mod.shutil, "which", lambda _: "/usr/bin/TNP")
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.ProfileExecution, "run", fake_run)
     assert TNPWrapper().profile(SEQUENCE) is None
     assert len(calls) == 3
     failures = [event for event in _events(caplog) if event["event"] == "attempt_failed"]

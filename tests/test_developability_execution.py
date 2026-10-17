@@ -3,12 +3,18 @@
 import ast
 import asyncio
 import hashlib
+import importlib.util
 import types
 import typing
 from pathlib import Path
 
 
 SOURCE = Path(__file__).parents[1] / "metanano/services/developability_service.py"
+SPEC = importlib.util.spec_from_file_location(
+    "tnp_service_under_test", SOURCE.parents[1] / "utils/tnp_wrapper.py",
+)
+module = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(module)
 tree = ast.parse(SOURCE.read_text())
 class_node = next(node for node in tree.body
                   if isinstance(node, ast.ClassDef) and node.name == "DevelopabilityService")
@@ -17,6 +23,7 @@ class_node = next(node for node in tree.body
 def service_class(filter_class):
     namespace = {
         "asyncio": asyncio, "hashlib": hashlib,
+        "ProfileExecution": module.ProfileExecution,
         "DevelopabilityConfig": object, "DevelopabilityResult": object,
         "DevelopabilityFilter": filter_class, "AsyncServiceManager": object,
         **{name: getattr(typing, name) for name in ("Any", "Dict", "List", "Optional", "Tuple")},
@@ -36,14 +43,15 @@ class Manager:
         pass
 
 
-def test_logging_preserves_existing_wrapper_call_api():
+def test_service_passes_its_deadline_to_the_wrapper():
     received = []
 
     class Filter:
         def __init__(self, _):
             pass
 
-        def compute_tnp_profile(self, sequence):
+        def compute_tnp_profile(self, sequence, *, execution):
+            assert 0 < execution.remaining() <= 300
             received.append(sequence)
             return {"flags": {"L": "green"}}
 
@@ -82,7 +90,7 @@ def test_no_profile_is_compute_error_not_biological_verdict():
         def __init__(self, _):
             pass
 
-        def compute_tnp_profile(self, sequence):
+        def compute_tnp_profile(self, sequence, *, execution):
             return None
 
     async def run():
@@ -100,7 +108,7 @@ def test_biological_red_flags_still_reject_without_error_flag():
         def __init__(self, _):
             pass
 
-        def compute_tnp_profile(self, sequence):
+        def compute_tnp_profile(self, sequence, *, execution):
             return {"flags": {"L": "red"}}
 
         def analyze_profile(self, sequence, profile):

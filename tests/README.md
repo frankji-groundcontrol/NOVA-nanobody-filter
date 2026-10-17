@@ -4,8 +4,9 @@ These tests load the wrapper directly or isolate the service class so they can r
 
 | File | Coverage |
 | --- | --- |
-| [test_tnp_wrapper_retry.py](test_tnp_wrapper_retry.py) | Retry limits, per-call diagnostics, concurrent correlation, sanitized traceback locations, invalid JSON and unchanged subprocess timeout |
-| [test_developability_execution.py](test_developability_execution.py) | Wrapper call compatibility, digest-linked compute errors, batch timeout classification and preservation of biological rejection |
+| [test_tnp_wrapper_retry.py](test_tnp_wrapper_retry.py) | Retry limits, per-call diagnostics, concurrent correlation, sanitized traceback locations, invalid JSON and shared-budget exhaustion |
+| [test_developability_execution.py](test_developability_execution.py) | Shared execution context, digest-linked compute errors, batch timeout classification and preservation of biological rejection |
+| [test_tnp_deadline.py](test_tnp_deadline.py) | Actual process-tree termination/reaping, shared retry and queue budgets, repeated cancellation, semaphore ownership and prevention of cancelled launches |
 
 Run `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests -q`. The combined suite is `python -m pytest metanano/tests tests --ignore=metanano/tests/tools -q`; external-tool tests additionally need their installed dependencies.
 

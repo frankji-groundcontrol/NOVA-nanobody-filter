@@ -12,6 +12,8 @@ Fixed numeric gates also require consistent serialization precision and method s
 
 TNP's output boundary must establish a complete finite measurement before running structural descriptors. Defaulting absent descriptors to zero turns unavailable data into apparent measurements; accepting NaN also defeats ordinary range comparisons. Recovery tests now require recomputation after invalid output and verify that only the successful attempt reaches A3D. HTTP response schemas must explicitly retain compute-error fields, or callers lose the distinction even when the service returns it. See the [TNP repair record](../changelogs/2026-10-17-tnp-integration-repair.md).
 
+Cancelling an await on `asyncio.to_thread` does not stop its thread or subprocess. A retry count and per-attempt timeout therefore do not bound total work after an HTTP timeout. The [deadline hardening](../changelogs/2026-10-17-tnp-deadline-hardening.md) shares one monotonic deadline with the synchronous wrapper and native scorer, explicitly terminates process groups and holds the semaphore until worker cleanup. Actual process-tree tests are needed to verify that cancellation stops work; an awaited timeout alone cannot establish it.
+
 Evidence: [filter checks](../../metanano/tests/test_aggrescan3d.py), [integration checks](../../metanano/tests/utils/test_aggrescan3d_integration.py), [metric helper checks](../../tools/aggrescan3d-rs/tests/metrics.rs), [upstream harness](../../tools/aggrescan3d-rs/tools/upstream_parity.py) and [verified change record](../changelogs/2026-10-17-aggrescan3d-rust.md).
 
 Parent: [learning index](README.md). Next: use this handoff pattern when adding another structural descriptor.

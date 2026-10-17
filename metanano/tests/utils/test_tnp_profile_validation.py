@@ -24,7 +24,7 @@ def test_invalid_attempt_is_recomputed_before_a3d(monkeypatch, failure):
     attempts = []
     scored = []
 
-    def run_tnp(command, **kwargs):
+    def run_tnp(self, command, **kwargs):
         attempts.append(command)
         name = command[command.index("--name") + 1]
         output = Path(command[command.index("--output") + 1])
@@ -54,14 +54,14 @@ def test_invalid_attempt_is_recomputed_before_a3d(monkeypatch, failure):
         (models / f"{name}_NanoBodyBuilder2_Model.pdb").write_text("model fixture")
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    def score(sequence, structure):
+    def score(sequence, structure, execution):
         assert sequence == SEQUENCE
         assert structure.read_text() == "model fixture"
         scored.append(structure)
         return {"status": "ok"}
 
     monkeypatch.setattr(module.shutil, "which", lambda executable: "/usr/bin/TNP")
-    monkeypatch.setattr(module.subprocess, "run", run_tnp)
+    monkeypatch.setattr(module.ProfileExecution, "run", run_tnp)
     result = module.TNPWrapper(aggrescan3d=score).profile(SEQUENCE)
 
     assert result is not None
@@ -72,7 +72,8 @@ def test_invalid_attempt_is_recomputed_before_a3d(monkeypatch, failure):
 
 
 @pytest.mark.parametrize("endpoint", ["analyze", "analyze-batch"])
-def test_developability_api_preserves_typed_compute_errors(monkeypatch, endpoint):
+@pytest.mark.parametrize("error_kind", ["no_profile", "timeout", "profile_exception"])
+def test_developability_api_preserves_typed_compute_errors(monkeypatch, endpoint, error_kind):
     import hashlib
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
@@ -84,7 +85,7 @@ def test_developability_api_preserves_typed_compute_errors(monkeypatch, endpoint
     failure = {
         "passed": False,
         "error": True,
-        "error_kind": "no_profile",
+        "error_kind": error_kind,
         "sequence_sha256": digest,
         "reason": "Failed to compute TNP profile.",
     }
@@ -103,5 +104,37 @@ def test_developability_api_preserves_typed_compute_errors(monkeypatch, endpoint
     result = response.json() if endpoint == "analyze" else response.json()["results"][0]
     assert not result["passed"]
     assert result["error"] is True
-    assert result["error_kind"] == "no_profile"
+    assert result["error_kind"] == error_kind
     assert result["sequence_sha256"] == digest
+
+
+@pytest.mark.parametrize("endpoint", ["analyze", "analyze-batch", "tnp-profile"])
+def test_deadline_reaches_single_and_batch_http_responses(monkeypatch, endpoint):
+    import hashlib
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from metanano.config import DevelopabilityConfig
+    from metanano.routes import developability_routes
+    from metanano.services.developability_service import DevelopabilityService
+
+    service = DevelopabilityService(
+        DevelopabilityConfig(), SimpleNamespace(initialize=AsyncMock(), batch_size=50),
+    )
+    monkeypatch.setattr(service, "compute_tnp_profile_async", AsyncMock(
+        side_effect=TimeoutError("UNTRUSTED_MARKER"),
+    ))
+    monkeypatch.setattr(developability_routes, "_service", service)
+    app = FastAPI()
+    app.include_router(developability_routes.router)
+    body = {"sequences": [SEQUENCE]} if endpoint == "analyze-batch" else {"sequence": SEQUENCE}
+    with TestClient(app) as client:
+        response = client.post(f"/developability/{endpoint}", json=body)
+
+    assert response.status_code == 200
+    result = response.json() if endpoint != "analyze-batch" else response.json()["results"][0]
+    assert result["error_kind"] == "timeout"
+    assert result["sequence_sha256"] == hashlib.sha256(SEQUENCE.encode()).hexdigest()
+    assert not result["success" if endpoint == "tnp-profile" else "passed"]
+    assert "UNTRUSTED_MARKER" not in response.text
