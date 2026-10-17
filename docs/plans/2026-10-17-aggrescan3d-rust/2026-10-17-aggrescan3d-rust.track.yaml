@@ -36,10 +36,13 @@ plan:
   - step: Harden the shared deadline and cancellation cleanup in PR 4
     owner: codex
     status: completed
+  - step: Verify predictor-backed TNP and deadline cleanup on an authorized GPU host
+    owner: codex
+    status: completed
 main:
-  outcome: "Developability requires TNP criteria and both whole-VHH A3D caps, with one prediction, shared deadlines and process cleanup"
+  outcome: "Developability requires TNP criteria and both whole-VHH A3D caps; actual GPU prediction, shared deadlines and cancellation cleanup are verified"
   owner: codex
   status: completed
   pull_request: "https://github.com/frankji-groundcontrol/NOVA-nanobody-filter/pull/4"
-  next_evidence: "PR 4 contains verified hardening commit dc9f638 and retains thanks to the PR 3 author. Review the PR and run predictor-backed timeout/cancellation checks on a serving host before rollout"
+  next_evidence: "Review PR 4 and provision the verified pinned dependencies and official model weights on serving hosts; deployed HTTP, real earlier filters and production concurrency remain outside this isolated GPU checkpoint"
 side_tracks: []

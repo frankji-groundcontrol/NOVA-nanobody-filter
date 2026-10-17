@@ -16,4 +16,6 @@ Cancelling an await on `asyncio.to_thread` does not stop its thread or subproces
 
 Evidence: [filter checks](../../metanano/tests/test_aggrescan3d.py), [integration checks](../../metanano/tests/utils/test_aggrescan3d_integration.py), [metric helper checks](../../tools/aggrescan3d-rs/tests/metrics.rs), [upstream harness](../../tools/aggrescan3d-rs/tools/upstream_parity.py) and [verified change record](../changelogs/2026-10-17-aggrescan3d-rust.md).
 
+The [actual GPU checkpoint](../changelogs/2026-10-17-tnp-deadline-hardening.md#predictor-backed-gpu-checkpoint) separates runtime provisioning from profile validation. A working CLI entry point and available CUDA do not establish that official predictor weights can be fetched. The initial missing-weight run stops at three attempts with `no_profile`; checksum-verified cached weights then produce a complete TNP/A3D result without changing NOVA. Actual GPU timeout and repeated cancellation each stop one attempt and release the slot after cleanup. Verify a normal prediction before interpreting interruption tests.
+
 Parent: [learning index](README.md). Next: use this handoff pattern when adding another structural descriptor.

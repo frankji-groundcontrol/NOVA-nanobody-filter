@@ -31,7 +31,7 @@ Known environment follow-up: a fresh Bittensor 9.9.0 resolution selected `async-
 
 TNP integration defects are repaired: complete finite measurements are required, invalid output is recomputed, correlated diagnostics replace shared error state, and compute-error metadata survives HTTP validation. See the [repair evidence](../changelogs/2026-10-17-tnp-integration-repair.md) and [operator guide](../usage/tnp-integration.md).
 
-TNP execution now has one deadline across queueing, retries and A3D. Timeout/cancellation stop the process group and retain the semaphore until cleanup; single/batch APIs preserve typed timeout errors. See the [hardening record](../changelogs/2026-10-17-tnp-deadline-hardening.md).
+TNP execution now has one deadline across queueing, retries and A3D. Timeout/cancellation stop the process group and retain the semaphore until cleanup; single/batch APIs preserve typed timeout errors. Actual GPU prediction with native A3D, a 10-second timeout and repeated cancellation pass in an isolated Linux runtime; official model weights must be cached where automatic downloads fail. See the [hardening record and GPU checkpoint](../changelogs/2026-10-17-tnp-deadline-hardening.md).
 
 ### 0.1 TNP (Therapeutic Nanobody Profiler) ✅
 
