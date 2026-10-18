@@ -39,10 +39,13 @@ plan:
   - step: Verify predictor-backed TNP and deadline cleanup on an authorized GPU host
     owner: codex
     status: completed
+  - step: Identify runtime bottlenecks and verify the actual OpenMM refinement platform
+    owner: codex
+    status: completed
 main:
   outcome: "Developability requires TNP criteria and both whole-VHH A3D caps; actual GPU prediction, shared deadlines and cancellation cleanup are verified"
   owner: codex
   status: completed
   pull_request: "https://github.com/frankji-groundcontrol/NOVA-nanobody-filter/pull/4"
-  next_evidence: "Review PR 4 and provision the verified pinned dependencies and official model weights on serving hosts; deployed HTTP, real earlier filters and production concurrency remain outside this isolated GPU checkpoint"
+  next_evidence: "Review PR 4 and provision the verified dependencies and weights; the checkpoint uses CUDA prediction and one-thread CPU OpenMM refinement. CUDA refinement speed/score agreement, deployed HTTP, real earlier filters and production concurrency remain unverified"
 side_tracks: []
