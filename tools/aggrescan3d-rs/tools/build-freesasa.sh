@@ -13,6 +13,10 @@ if [ "$(git -C "$source_root/upstream" rev-parse HEAD)" != "$revision" ]; then
   exit 2
 fi
 cd "$source_root/upstream/aggrescan/data/freesasa-2.0.1"
+# Git does not preserve timestamps, so Make treats the release's generated
+# Autotools files as stale and tries to rebuild them with aclocal-1.15.
+touch aclocal.m4 configure config.h.in Makefile.in src/Makefile.in \
+  tests/Makefile.in share/Makefile.in doc/Makefile.in bindings/Makefile.in
 ./configure --disable-json --disable-xml --disable-threads --disable-check
 make -j4
 ./src/freesasa --version
