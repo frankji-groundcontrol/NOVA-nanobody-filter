@@ -10,16 +10,11 @@ A high-performance nanobody sequence validation system for the NOVA Nanobody Cha
 
 ## Overview
 
-The system validates nanobody sequences through a three-stage pipeline:
+The system validates nanobody sequences through three cascading filters:
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  1. Diversity   │ -> │  2. Nativeness  │ -> │ 3. Developability│
-│     Filter      │    │     Filter      │    │     Filter      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-     MMseqs2              IgBlast                 TNP Profiler
-     CDR mutations        IMGT numbering          Red region check
-     K-mer similarity     Humanness score         Surface patches
+Diversity → Nativeness → Developability → Passed
+MMseqs2     IgBlast       TNP Red Regions + A3D mean/peak caps
 ```
 
 ## Key Features
@@ -28,7 +23,7 @@ The system validates nanobody sequences through a three-stage pipeline:
 |---------|-------------|
 | **Diversity Filter** | MMseqs2 clustering, CDR mutation checks, historical similarity |
 | **Nativeness Filter** | IMGT numbering, nativeness/humanness scoring |
-| **Developability Filter** | TNP profiling, red region validation, charge patch analysis |
+| **Developability Filter** | TNP Red Regions and registered Aggrescan3D Rust mean/peak caps using the same model |
 | **Async Architecture** | Semaphore-controlled concurrency, GPU scheduler |
 | **REST API** | FastAPI endpoints with OpenAPI documentation |
 
@@ -50,6 +45,10 @@ pip install -r install/requirements.txt
 
 # Install external tools (MMseqs2, TNP, etc.)
 bash install/install.sh
+
+# Build the developability aggregation subfilter (requires Rust, Git, a C compiler and Make)
+sh install/install-aggrescan3d.sh
+export PATH="$PWD/.tools/bin:$PATH"
 ```
 
 ### Run the Server
@@ -81,10 +80,9 @@ config = Config()
 pipeline = ValidationPipeline(config)
 
 result = pipeline.validate(sequence)
-print(f"Passed: {result.passed}")
-print(f"Diversity: {result.diversity_passed}")
-print(f"Nativeness: {result.nativeness_passed}")
-print(f"Developability: {result.developability_passed}")
+print(result.validation_status)
+print(result.failed_filters)
+print(result.details.get("developability", {}).get("aggrescan3d"))
 ```
 
 ## API Endpoints
@@ -96,7 +94,7 @@ print(f"Developability: {result.developability_passed}")
 | `/validate/batch` | POST | Validate multiple sequences |
 | `/diversity/analyze` | POST | Diversity analysis |
 | `/nativeness/analyze` | POST | Nativeness scoring |
-| `/developability/analyze` | POST | Developability profiling |
+| `/developability/analyze` | POST | Combined TNP and Aggrescan3D developability filtering |
 | `/services/gpu` | GET | GPU scheduler status |
 
 ## Sequence Search Guide
@@ -260,6 +258,10 @@ asyncio.run(main())
 | Positive Charge Patches | ≤ 1.18 |
 | Negative Charge Patches | ≤ 1.88 |
 
+### Aggrescan3D (whole VHH)
+
+Within Developability, both inclusive caps must pass: `a3d_average <= -0.68002724866200` and `a3d_maximum <= 1.58023066762925`. This subfilter is enabled by default under `config.developability.aggrescan3d`. It requires the default scale, 10 Å radius and pinned FreeSASA 2.0.1 static method. Missing or incompatible scores fail Developability with an explicit error. See the [filter policy and configuration](docs/usage/aggrescan3d-rust.md).
+
 ## External Tools
 
 | Tool | Purpose | Repository |
@@ -269,9 +271,17 @@ asyncio.run(main())
 | IgBlast | Nativeness/humanness scoring | [NCBI](https://ftp.ncbi.nih.gov/blast/executables/igblast/release/) |
 | promb | Humanness scoring | [GitHub](https://github.com/MSDLLCpapers/promb) |
 | TNP | Developability profiling | [GitHub](https://github.com/oxpig/TNP) |
+| Aggrescan3D Rust | Static whole-VHH aggregation filter using TNP's existing model | [Native scorer](tools/aggrescan3d-rs/README.md) |
+
+Aggrescan3D method: Zambrano et al. (2015), *AGGRESCAN3D (A3D): server for prediction of aggregation properties of protein structures*, [doi:10.1093/nar/gkv359](https://doi.org/10.1093/nar/gkv359). See the [installation, filter policy, reusable functions and citation guide](docs/usage/aggrescan3d-rust.md).
 
 ## Documentation
 
+- [Documentation Index](docs/README.md) - Technical guides, usage, dated changes, plans and verified lessons
+- [Aggrescan3D Rust Integration](docs/usage/aggrescan3d-rust.md) - Registered filter, whole-VHH/region metrics, reusable functions, provenance and paper citation
+- [TNP Integration](docs/usage/tnp-integration.md) - Complete-profile recovery, shared deadlines, cancellation cleanup and compute-error fields
+- [Isolated TNP Tests](tests/README.md) - Run wrapper/service checks without GPU or application dependencies
+- [Development Plans](docs/plans/README.md) - Current integration scope and durable verification state
 - [English Documentation](docs/en/README.md) - Full technical documentation
 - [Search Quickstart](docs/en/SEARCH_QUICKSTART.md) - Fast start for indexing and async search
 - [Real-Data Search Repro](docs/en/SEARCH_REAL_DATA_REPRO.md) - Reproduce E2E search test with public VHH dataset

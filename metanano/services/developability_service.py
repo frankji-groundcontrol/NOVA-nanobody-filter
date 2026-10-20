@@ -23,11 +23,13 @@ Consumers / 调用方:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import Any, Dict, List, Optional, Tuple
 
 from metanano.config import DevelopabilityConfig
 from metanano.filters.developability import DevelopabilityFilter, DevelopabilityResult
 from metanano.services.async_manager import AsyncServiceManager, get_service_manager
+from metanano.utils.tnp_wrapper import ProfileExecution
 
 
 class DevelopabilityService:
@@ -92,15 +94,31 @@ class DevelopabilityService:
         Returns / 返回:
             Optional[Dict[str, Any]]: TNP profile or None if failed.
         """
-        await self.manager.initialize()
-        async with self.manager.tnp_semaphore:
-            return await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._filter.compute_tnp_profile,
-                    sequence,
-                ),
-                timeout=self.manager.task_timeout,
-            )
+        execution = ProfileExecution(self.manager.task_timeout)
+        await asyncio.wait_for(self.manager.initialize(), timeout=execution.remaining())
+        semaphore = self.manager.tnp_semaphore
+        await asyncio.wait_for(semaphore.acquire(), timeout=execution.remaining())
+        try:
+            worker = asyncio.create_task(asyncio.to_thread(
+                self._filter.compute_tnp_profile, sequence, execution=execution,
+            ))
+            try:
+                profile = await asyncio.wait_for(asyncio.shield(worker), timeout=execution.remaining())
+                execution.remaining()
+                return profile
+            finally:
+                execution.cancel()
+                while not worker.done():
+                    try:
+                        await asyncio.shield(worker)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not worker.cancelled():
+                    worker.exception()
+        finally:
+            semaphore.release()
 
     async def check_red_region_async(
         self,
@@ -131,44 +149,29 @@ class DevelopabilityService:
         Returns / 返回:
             Dict[str, Any]: Complete analysis result. / 完整的分析结果。
         """
-        await self.manager.initialize()
-
         # Compute TNP profile
         # 计算 TNP 分析结果
-        profile = await self.compute_tnp_profile_async(sequence)
+        error_kind = "no_profile"
+        try:
+            profile = await self.compute_tnp_profile_async(sequence)
+        except TimeoutError:
+            profile = None
+            error_kind = "timeout"
         if not profile:
-            # No profile means the TNP tool could not run to completion, which is
-            # a statement about the host and not about the molecule. "error" lets
-            # callers tell an infrastructure failure apart from a sequence that
-            # was measured and found undevelopable.
-            # 没有 profile 意味着 TNP 工具无法运行完成，这是关于主机的问题，
-            # 而不是关于分子的问题。"error" 让调用方区分基础设施故障与
-            # 已测量且不可开发的序列。
+            # No profile is a compute failure, not a measured developability
+            # verdict. It may be host-, input-, model- or parser-dependent;
+            # neither a CUDA cause nor sequence validity follows from it alone.
+            # "error" separates an unmeasured sequence from a biological red flag.
             return {
                 "passed": False,
                 "error": True,
-                "reason": "Failed to compute TNP profile. / 无法计算 TNP 分析结果。",
+                "error_kind": error_kind,
+                "sequence_sha256": hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
+                "reason": "Failed to compute TNP profile.",
             }
 
-        # Check Red Region criteria
-        # 检查红区标准
-        passed, red_flags = await self.check_red_region_async(profile)
-
-        result: Dict[str, Any] = {
-            "passed": passed,
-            "total_cdr_length": profile.get("total_cdr_length"),
-            "cdr3_length": profile.get("cdr3_length"),
-            "cdr3_compactness": profile.get("cdr3_compactness"),
-            "surface_hydrophobic_patches": profile.get("surface_hydrophobic_patches"),
-            "positive_charge_patches": profile.get("positive_charge_patches"),
-            "negative_charge_patches": profile.get("negative_charge_patches"),
-            "flags": profile.get("flags"),
-        }
-
-        if red_flags:
-            result["red_flags"] = red_flags
-            result["reason"] = "; ".join(red_flags)
-
+        result = self._filter.analyze_profile(sequence, profile).to_dict()
+        result["flags"] = profile.get("flags")
         return result
 
     async def analyze_batch_async(
@@ -185,8 +188,6 @@ class DevelopabilityService:
         Returns / 返回:
             List[Dict[str, Any]]: Results for each sequence. / 每个序列的结果。
         """
-        await self.manager.initialize()
-
         # Process in batches respecting semaphore limits
         # 按批次处理，遵守信号量限制
         batch_size = self.manager.batch_size
@@ -199,14 +200,16 @@ class DevelopabilityService:
                 return_exceptions=True,
             )
 
-            for result in batch_results:
+            for sequence, result in zip(batch, batch_results):
                 if isinstance(result, Exception):
                     results.append({
                         "passed": False,
-                        "reason": f"Error: {str(result)}",
+                        "error": True,
+                        "error_kind": "timeout" if isinstance(result, TimeoutError) else "profile_exception",
+                        "sequence_sha256": hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
+                        "reason": "Failed to compute TNP profile.",
                     })
                 else:
                     results.append(result)
 
         return results
-

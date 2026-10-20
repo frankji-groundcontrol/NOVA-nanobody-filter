@@ -4,6 +4,7 @@ Implementation plan for a modular nanobody challenge submission system in Python
 
 ## Related Docs
 
+- [Aggrescan3D Rust Integration](../usage/aggrescan3d-rust.md) - Registered filter, native installation, VHH/region metrics, reusable functions and paper citation
 - [Search Quickstart](SEARCH_QUICKSTART.md) - One-page guide for indexing, submitting, and polling search jobs
 - [中文搜索快速上手](../cn/SEARCH_QUICKSTART.md) - Chinese search quickstart
 - [Search Performance Benchmarks](#12-search-performance-benchmarks) - Tier 1 and Tier 2 search benchmark results on real data
@@ -106,6 +107,10 @@ Implementation plan for a modular nanobody challenge submission system in Python
   * Chain filters in order: **Diversity → Nativeness → Developability**
   * Early termination: Stop processing if any filter fails
   * Provide detailed feedback and return the validation status for each submission
+
+### Aggrescan3D aggregation filter
+
+The Developability stage includes a registered A3D subfilter requiring both whole-VHH mean `<= -0.68002724866200` and peak `<= 1.58023066762925`. It is enabled by default alongside TNP criteria and consumes native scores from TNP's existing model. Missing, non-finite or incompatible measurements cannot pass Developability. See the [method, fixed policy, installation and regional reporting guide](../usage/aggrescan3d-rust.md).
 
 ---
 
@@ -324,6 +329,8 @@ async def validate_sequence(sequence_input: Sequence) -> ValidationResponse:
 
 **Implementation:** `metanano/routes/developability_routes.py`
 
+Developability analysis requires TNP criteria and enabled A3D caps. The nested `aggrescan3d` result includes both cap checks and native provenance. Full validation returns it under `details.developability.aggrescan3d` and attributes rejection to `Developability`.
+
 ### **3.7 /services/** (Management Routes)
 
 **Purpose:** Service management and GPU scheduler control.
@@ -373,7 +380,7 @@ async def validate_sequence(sequence_input: Sequence) -> ValidationResponse:
                                 ┌──────────────┐    ┌─────────────────────────────────────┐
                                 │ REJECT       │    │  STEP 3: DEVELOPABILITY FILTER      │
                                 │ (Nativeness) │    │  ├── TNP Profiler                   │
-                                └──────────────┘    │  └── Red Region criteria check      │
+                                └──────────────┘    │  └── TNP Red Regions + A3D caps      │
                                                     └─────────────────────────────────────┘
                                                                      │
                                                               PASS?  │
@@ -401,7 +408,8 @@ async def validate_sequence(sequence_input: Sequence) -> ValidationResponse:
 3. **Developability Validation:**
    * The sequence is checked against the **TNP** (Therapeutic Nanobody Profiler).
    * If ANY property falls into the **Red Region**, the sequence is **rejected**.
-   * Only sequences with ALL properties within valid ranges pass this filter.
+   * Reuse TNP's isolated model for the registered A3D subfilter, requiring both fixed mean/peak caps with compatible static settings.
+   * Pass only when TNP criteria and enabled A3D caps all pass. Scoring errors remain explicit and fail Developability.
 
 ### **4.2 Output:**
 
@@ -455,6 +463,8 @@ config.developability.negative_charge_patches.threshold # 1.88
 ```
 
 ### **5.4 Async Concurrency Config**
+
+Aggrescan3D uses `config.developability.aggrescan3d.enabled` (default `True`), `max_average` (decimal `-0.68002724866200`), `max_peak` (decimal `1.58023066762925`), `executable` and `freesasa_executable`. It shares TNP's model-lifetime and semaphore-controlled work. See [configuration examples](../usage/aggrescan3d-rust.md#install-and-enable).
 
 ```python
 # Semaphore limits for concurrent operations
@@ -853,6 +863,7 @@ The system uses a layered async architecture for high-throughput processing.
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      Filter Layer (synchronous)                      │
 │  DiversityFilter, NativenessFilter, DevelopabilityFilter             │
+│  └── Developability includes Aggrescan3DFilter                       │
 │  └── Pure computation, no async awareness                           │
 └─────────────────────────────────────────────────────────────────────┘
 ```

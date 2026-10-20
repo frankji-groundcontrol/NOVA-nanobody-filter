@@ -1,0 +1,9 @@
+[package]
+name = "aggrescan3d-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Static Aggrescan3D scoring in Rust with pinned FreeSASA accessibility"
+license = "MIT"
+
+[dependencies]
+sha2 = "0.10"

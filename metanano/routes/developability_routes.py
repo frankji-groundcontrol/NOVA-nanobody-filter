@@ -15,7 +15,8 @@ Consumers / 调用方:
     - app.py
 """
 
-from typing import Any, Dict, List, Optional
+import hashlib
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -52,9 +53,11 @@ class DevelopabilityResponse(BaseModel):
 
     passed: bool = Field(
         ...,
-        description="Whether sequence passed (no Red Region criteria triggered). / "
-        "序列是否通过（无红区标准被触发）。",
+        description="Whether the sequence passed TNP criteria and enabled Aggrescan3D caps.",
     )
+    error: bool = Field(default=False, description="Whether computation failed before a complete profile was available.")
+    error_kind: Optional[Literal["no_profile", "timeout", "profile_exception"]] = None
+    sequence_sha256: Optional[str] = None
     total_cdr_length: Optional[int] = Field(
         default=None,
         description="Total CDR length (valid: 20-39). / 总 CDR 长度（有效：20-39）。",
@@ -91,14 +94,17 @@ class DevelopabilityResponse(BaseModel):
         default=None,
         description="Failure reason if not passed. / 未通过时的失败原因。",
     )
+    aggrescan3d: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Aggrescan3D scores, cap decisions and provenance within Developability.",
+    )
 
 
 @router.post(
     "/analyze",
     response_model=DevelopabilityResponse,
     summary="Analyze Sequence Developability / 分析序列可开发性",
-    description="Check if sequence meets therapeutic developability requirements (Red Region criteria). / "
-    "检查序列是否满足治疗可开发性要求（红区标准）。",
+    description="Check TNP Red Region criteria and enabled whole-VHH Aggrescan3D mean and peak caps.",
 )
 async def analyze_developability(request: DevelopabilityRequest) -> DevelopabilityResponse:
     """
@@ -127,6 +133,8 @@ class TNPProfileResponse(BaseModel):
     """Response for TNP profiling. / TNP 分析响应。"""
 
     success: bool
+    error_kind: Optional[Literal["no_profile", "timeout"]] = None
+    sequence_sha256: Optional[str] = None
     total_cdr_length: Optional[int] = None
     cdr3_length: Optional[int] = None
     cdr3_compactness: Optional[float] = None
@@ -134,6 +142,7 @@ class TNPProfileResponse(BaseModel):
     positive_charge_patches: Optional[float] = None
     negative_charge_patches: Optional[float] = None
     flags: Optional[Dict[str, str]] = None
+    aggrescan3d: Optional[Dict[str, Any]] = None
 
 
 @router.post(
@@ -148,12 +157,14 @@ async def get_tnp_profile(request: TNPProfileRequest) -> TNPProfileResponse:
     Get TNP profile.
     获取 TNP 分析。
     """
+    sequence = request.sequence.strip().upper()
+    digest = hashlib.sha256(sequence.encode("utf-8")).hexdigest()
     try:
         result = await _service.compute_tnp_profile_async(
-            sequence=request.sequence.strip().upper(),
+            sequence=sequence,
         )
         if result is None:
-            return TNPProfileResponse(success=False)
+            return TNPProfileResponse(success=False, error_kind="no_profile", sequence_sha256=digest)
         return TNPProfileResponse(
             success=True,
             total_cdr_length=result.get("total_cdr_length"),
@@ -163,7 +174,10 @@ async def get_tnp_profile(request: TNPProfileRequest) -> TNPProfileResponse:
             positive_charge_patches=result.get("positive_charge_patches"),
             negative_charge_patches=result.get("negative_charge_patches"),
             flags=result.get("flags"),
+            aggrescan3d=result.get("aggrescan3d"),
         )
+    except TimeoutError:
+        return TNPProfileResponse(success=False, error_kind="timeout", sequence_sha256=digest)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

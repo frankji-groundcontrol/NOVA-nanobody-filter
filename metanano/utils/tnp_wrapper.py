@@ -39,18 +39,105 @@ Consumers / 调用方:
 """
 
 import json
+import hashlib
 import logging
+import math
+import re
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
+import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
+
+# Only scientific source locations are loggable. Full paths and source lines
+# can contain sensitive values, so do not forward them from a raw traceback.
+_TRACEBACK_COMPONENTS = {
+    "TNP": "TNP",
+    "CDR_Assigner.py": "tnp_cdr_assigner",
+    "CDR3_Conf_Assigner.py": "tnp_cdr3_compactness",
+    "Hydrophobicity_and_Charge_Assigner.py": "tnp_surface_properties",
+    "PDBUtils.py": "tnp_pdb_utils",
+    "ABodyBuilder2.py": "immunebuilder_abodybuilder2",
+    "NanoBodyBuilder2.py": "immunebuilder_nanobodybuilder2",
+    "NBBuilder2.py": "immunebuilder_nbbuilder2",
+    "sequence_checks.py": "immunebuilder_sequence_checks",
+    "anarci.py": "anarci",
+}
+
+
+class ProfileExecution:
+    """Share one deadline and cancellation signal across TNP and native scoring.
+
+    Each command owns a POSIX process group. Cleanup terminates descendants,
+    escalates after a short grace period and reaps the direct child before return.
+    See docs/usage/tnp-integration.md and tests/test_tnp_deadline.py.
+    """
+
+    def __init__(self, timeout: float = 300.0) -> None:
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Profiling timeout must be finite and positive")
+        self.deadline = time.monotonic() + timeout
+        self._cancelled = threading.Event()
+
+    def remaining(self) -> float:
+        remaining = self.deadline - time.monotonic()
+        if self._cancelled.is_set() or remaining <= 0:
+            raise TimeoutError("Profiling deadline exceeded or execution cancelled")
+        return remaining
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+    def run(self, command: list[str], *, timeout: float) -> subprocess.CompletedProcess:
+        """Capture a command within the remaining budget; always stop its tree."""
+        timeout = min(timeout, self.remaining())
+        deadline = time.monotonic() + timeout
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True,
+        )
+        output = errors = None
+        try:
+            while True:
+                remaining = min(deadline - time.monotonic(), self.remaining())
+                if remaining <= 0:
+                    raise TimeoutError
+                try:
+                    output, errors = process.communicate(timeout=min(0.05, remaining))
+                except subprocess.TimeoutExpired as error:
+                    output, errors = error.output, error.stderr
+                    continue
+                self.remaining()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError
+                return subprocess.CompletedProcess(command, process.returncode, output, errors)
+        except TimeoutError:
+            raise subprocess.TimeoutExpired(command, timeout, output=output, stderr=errors) from None
+        finally:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                pass
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            process.stdout.close()
+            process.stderr.close()
 
 
 class TNPResult(BaseModel):
@@ -71,6 +158,8 @@ class TNPResult(BaseModel):
     Consumers / 调用方:
         - metanano/filters/developability.py
     """
+
+    model_config = {"allow_inf_nan": False}
 
     name: str = Field(
         ...,
@@ -105,6 +194,7 @@ class TNPResult(BaseModel):
         description="Flag colors for each property (green/yellow/red) / "
         "每个属性的标志颜色（绿色/黄色/红色）",
     )
+    aggrescan3d: Optional[Dict[str, Any]] = None
 
     def to_profile_dict(self) -> Dict[str, Any]:
         """
@@ -115,7 +205,7 @@ class TNPResult(BaseModel):
             Dict[str, Any]: Profile dictionary with standard keys.
                 具有标准键的 profile 字典。
         """
-        return {
+        profile = {
             "total_cdr_length": self.total_cdr_length,
             "cdr3_length": self.cdr3_length,
             "cdr3_compactness": self.cdr3_compactness,
@@ -124,6 +214,9 @@ class TNPResult(BaseModel):
             "negative_charge_patches": self.pnc,
             "flags": self.flags,
         }
+        if self.aggrescan3d is not None:
+            profile["aggrescan3d"] = self.aggrescan3d
+        return profile
 
 
 class TNPWrapper:
@@ -146,6 +239,7 @@ class TNPWrapper:
         tnp_executable: str = "TNP",
         temp_dir: Optional[Path] = None,
         max_attempts: int = 3,
+        aggrescan3d: Optional[Callable[[str, Path, ProfileExecution], Dict[str, Any]]] = None,
     ) -> None:
         """
         Initialize the TNP wrapper.
@@ -164,7 +258,7 @@ class TNPWrapper:
         self.tnp_executable = tnp_executable
         self.temp_dir = temp_dir
         self.max_attempts = max(1, int(max_attempts))
-        self._last_error = "unknown"
+        self.aggrescan3d = aggrescan3d
 
     def _check_tnp_available(self) -> bool:
         """
@@ -177,7 +271,10 @@ class TNPWrapper:
         """
         return shutil.which(self.tnp_executable) is not None
 
-    def profile(self, sequence: str, name: Optional[str] = None) -> Optional[TNPResult]:
+    def profile(
+        self, sequence: str, name: Optional[str] = None,
+        *, execution: Optional[ProfileExecution] = None,
+    ) -> Optional[TNPResult]:
         """
         Run TNP profiling on a sequence.
         对序列运行 TNP 分析。
@@ -187,6 +284,8 @@ class TNPWrapper:
                 纳米抗体氨基酸序列。
             name (Optional[str]): Name for the sequence. If None, generates UUID.
                 序列的名称。如果为 None，生成 UUID。
+            execution: Shared deadline/cancellation context. Defaults to one
+                300-second budget for every attempt and native scoring together.
 
         Returns / 返回:
             Optional[TNPResult]: TNP result or None if profiling failed.
@@ -201,8 +300,19 @@ class TNPWrapper:
         Consumers / 调用方:
             - metanano/filters/developability.py: DevelopabilityFilter.compute_tnp_profile
         """
+        execution = execution or ProfileExecution()
+        started = time.monotonic()
+        context = {
+            "schema": 1,
+            "profile_id": uuid.uuid4().hex,
+            "sequence_sha256": hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
+            "sequence_length": len(sequence),
+            "max_attempts": self.max_attempts,
+        }
+        self._diagnostic(context, event="profile_started", attempt=0)
         if not self._check_tnp_available():
-            logger.error("TNP executable %r not found on PATH", self.tnp_executable)
+            self._diagnostic(context, event="profile_exhausted", attempt=0,
+                             categories=["executable_missing"], elapsed_s=0.0)
             return None
 
         # TNP delegates structure prediction to NanoBodyBuilder2 (ImmuneBuilder)
@@ -215,34 +325,98 @@ class TNPWrapper:
         # TNP 将结构预测委托给 GPU 上的 NanoBodyBuilder2（ImmuneBuilder），
         # 它可能出现瞬时故障。这是主机当时的状态问题，而非序列的问题：
         # 同一序列在重试时可以正常分析。
-        for attempt in range(1, self.max_attempts + 1):
-            result = self._run_once(sequence, name, attempt)
-            if result is not None:
-                if attempt > 1:
-                    logger.info("TNP succeeded on attempt %d", attempt)
-                return result
+        last_attempt = 0
+        try:
+            for attempt in range(1, self.max_attempts + 1):
+                timeout = min(300.0, execution.remaining())
+                last_attempt = attempt
+                result = self._run_once(
+                    sequence, name, attempt, timeout=timeout, context=context, execution=execution,
+                )
+                execution.remaining()
+                if result is not None:
+                    self._diagnostic(context, event="profile_succeeded", attempt=attempt,
+                                     elapsed_s=round(time.monotonic() - started, 3))
+                    return result
+        except TimeoutError:
+            self._diagnostic(context, event="profile_exhausted", attempt=last_attempt,
+                             categories=["timeout"], elapsed_s=round(time.monotonic() - started, 3))
+            return None
 
-        logger.warning(
-            "TNP produced no profile after %d attempt(s); last failure: %s",
-            self.max_attempts,
-            self._last_error,
-        )
+        self._diagnostic(context, event="profile_exhausted", attempt=last_attempt,
+                         elapsed_s=round(time.monotonic() - started, 3))
         return None
+
+    @staticmethod
+    def _diagnostic(context: Dict[str, Any], **fields: Any) -> None:
+        """Only fixed categories, scientific digests and numeric data reach logs.
+
+        Never forward CLI output, exception strings, paths or environment values.
+        Each profile has its own context, even on a shared concurrent wrapper.
+        """
+        event = {**context, **fields}
+        logger.warning("TNP_DIAGNOSTIC %s", json.dumps(event, sort_keys=True),
+                       extra={"tnp_diagnostic": event})
+
+    @staticmethod
+    def _failure_categories(*streams: Any) -> list[str]:
+        text = "\n".join(
+            stream.decode("utf-8", errors="replace") if isinstance(stream, bytes)
+            else stream if isinstance(stream, str) else ""
+            for stream in streams
+        ).lower()
+        patterns = {
+            "cuda_launch_failure": ("unspecified launch failure",),
+            "cuda_oom": ("cuda out of memory", "cuda error: out of memory"),
+            "cuda_illegal_memory": ("illegal memory access",),
+            "cuda_device_assert": ("device-side assert",),
+            "model_prediction_failed": ("failed to generate a model",),
+            "openmm_error": ("openmmexception", "openmm error"),
+            "import_error": ("modulenotfounderror", "importerror"),
+            "none_subscript": ("typeerror: 'nonetype' object is not subscriptable",),
+        }
+        return [category for category, needles in patterns.items()
+                if any(needle in text for needle in needles)]
+
+    @staticmethod
+    def _traceback_locations(*streams: Any) -> list[dict[str, Any]]:
+        locations = []
+        for stream in streams:
+            if isinstance(stream, bytes):
+                stream = stream.decode("utf-8", errors="replace")
+            if not isinstance(stream, str):
+                continue
+            for match in re.finditer(r'File "([^"\r\n]+)", line ([0-9]{1,7})', stream):
+                filename = match.group(1).replace("\\", "/").rsplit("/", 1)[-1]
+                component = _TRACEBACK_COMPONENTS.get(filename)
+                if component is not None:
+                    locations.append({"component": component, "line": int(match.group(2))})
+        return locations[-16:]
 
     def _run_once(
         self,
         sequence: str,
         name: Optional[str],
         attempt: int,
+        *, execution: ProfileExecution, timeout: float = 300.0,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[TNPResult]:
         """
-        Run TNP once, recording the failure cause on self._last_error.
-        运行一次 TNP，将失败原因记录在 self._last_error 上。
+        Run TNP once, recording allowlisted per-call diagnostics.
 
         Returns / 返回:
             Optional[TNPResult]: Parsed result, or None if this attempt failed.
                 解析后的结果，如果本次尝试失败则返回 None。
         """
+        context = context or {
+            "schema": 1, "profile_id": uuid.uuid4().hex,
+            "sequence_sha256": hashlib.sha256(sequence.encode("utf-8")).hexdigest(),
+            "sequence_length": len(sequence),
+            "max_attempts": self.max_attempts,
+        }
+        started = time.monotonic()
+        self._diagnostic(context, event="attempt_started", attempt=attempt,
+                         timeout_s=round(timeout, 3))
         # Generate unique name if not provided
         # 如果未提供，生成唯一名称
         seq_name = name or f"seq_{uuid.uuid4().hex[:8]}"
@@ -267,54 +441,57 @@ class TNPWrapper:
             ]
 
             try:
-                subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=300,  # 5 minutes timeout
-                )
+                completed = execution.run(cmd, timeout=timeout)
+                completed.check_returncode()
             except subprocess.CalledProcessError as e:
-                # TNP exits non-zero when it could not model the sequence, so its
-                # stderr is the only record of why. Keep it out of the return
-                # value but put it in the log.
-                # TNP 无法建模时以非零状态退出，其 stderr 是唯一的原因记录。
-                self._last_error = self._summarize(e.stderr) or f"exit {e.returncode}"
-                logger.warning(
-                    "TNP attempt %d failed (exit %s): %s",
-                    attempt, e.returncode, self._last_error,
-                )
+                categories = self._failure_categories(e.stdout, e.stderr)
+                self._diagnostic(context, event="attempt_failed", attempt=attempt,
+                                 returncode=e.returncode,
+                                 categories=categories or ["process_failed"],
+                                 traceback_locations=self._traceback_locations(e.stdout, e.stderr),
+                                 elapsed_s=round(time.monotonic() - started, 3))
                 return None
-            except subprocess.TimeoutExpired:
-                self._last_error = "timed out after 300s"
-                logger.warning("TNP attempt %d timed out", attempt)
+            except subprocess.TimeoutExpired as e:
+                self._diagnostic(context, event="attempt_failed", attempt=attempt,
+                                 categories=["timeout"] + self._failure_categories(e.stdout, e.stderr),
+                                 traceback_locations=self._traceback_locations(e.stdout, e.stderr),
+                                 timeout_s=round(timeout, 3),
+                                 elapsed_s=round(time.monotonic() - started, 3))
                 return None
             except FileNotFoundError:
-                self._last_error = f"executable {self.tnp_executable!r} not found"
-                logger.error("TNP executable disappeared mid-run")
+                self._diagnostic(context, event="attempt_failed", attempt=attempt,
+                                 categories=["executable_missing"],
+                                 elapsed_s=round(time.monotonic() - started, 3))
+                return None
+            except OSError:
+                self._diagnostic(context, event="attempt_failed", attempt=attempt,
+                                 categories=["process_start_failed"],
+                                 elapsed_s=round(time.monotonic() - started, 3))
                 return None
 
             # Parse output JSON
             # 解析输出 JSON
             parsed = self._parse_output(output_dir, seq_name)
             if parsed is None:
-                self._last_error = "TNP exited cleanly but wrote no usable profile"
-                logger.warning("TNP attempt %d: %s", attempt, self._last_error)
+                exists = (output_dir / f"TNP_Results_SingleSeqEntry_{seq_name}.json").exists()
+                categories = self._failure_categories(completed.stdout, completed.stderr)
+                self._diagnostic(context, event="attempt_failed", attempt=attempt,
+                                 returncode=completed.returncode,
+                                 categories=categories + ["profile_invalid" if exists else "profile_missing"],
+                                 traceback_locations=self._traceback_locations(completed.stdout, completed.stderr),
+                                 elapsed_s=round(time.monotonic() - started, 3))
+            else:
+                if self.aggrescan3d is not None:
+                    structure = (
+                        output_dir / "Final_Models" / f"{seq_name}_NanoBodyBuilder2_Model.pdb"
+                    )
+                    execution.remaining()
+                    parsed.aggrescan3d = self.aggrescan3d(sequence, structure, execution)
+                execution.remaining()
+                self._diagnostic(context, event="attempt_succeeded", attempt=attempt,
+                                 returncode=completed.returncode,
+                                 elapsed_s=round(time.monotonic() - started, 3))
             return parsed
-
-    @staticmethod
-    def _summarize(stderr: Optional[str], limit: int = 300) -> str:
-        """
-        Reduce a TNP traceback to its final, informative line.
-        将 TNP 的回溯信息缩减为最后一行有效信息。
-        """
-        if not stderr:
-            return ""
-        lines = [line.strip() for line in stderr.splitlines() if line.strip()]
-        for line in reversed(lines):
-            if not line.startswith('File "') and "^" not in line:
-                return line[:limit]
-        return lines[-1][:limit] if lines else ""
 
     def _parse_output(
         self,
@@ -348,7 +525,7 @@ class TNPWrapper:
 
             # Extract sequence data
             # 提取序列数据
-            if seq_name not in data:
+            if not isinstance(data, dict) or not isinstance(data.get(seq_name), dict):
                 return None
 
             seq_data = data[seq_name]
@@ -357,16 +534,16 @@ class TNPWrapper:
             # 解析字段
             return TNPResult(
                 name=seq_data.get("name", seq_name),
-                total_cdr_length=seq_data.get("Total CDR Length", 0),
-                cdr3_length=seq_data.get("CDR3 Length", 0),
-                cdr3_compactness=seq_data.get("CDR3 Compactness", 0.0),
-                psh=seq_data.get("PSH", 0.0),
-                ppc=seq_data.get("PPC", 0.0),
-                pnc=seq_data.get("PNC", 0.0),
+                total_cdr_length=seq_data["Total CDR Length"],
+                cdr3_length=seq_data["CDR3 Length"],
+                cdr3_compactness=seq_data["CDR3 Compactness"],
+                psh=seq_data["PSH"],
+                ppc=seq_data["PPC"],
+                pnc=seq_data["PNC"],
                 flags=seq_data.get("Flags", {}),
             )
 
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError, ValidationError, OSError):
             return None
 
     def profile_batch(
@@ -392,7 +569,3 @@ class TNPWrapper:
         for name, sequence in sequences.items():
             results[name] = self.profile(sequence, name=name)
         return results
-
-
-
-
