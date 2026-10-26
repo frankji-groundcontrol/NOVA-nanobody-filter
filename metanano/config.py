@@ -21,6 +21,8 @@ Consumers / 调用方:
     - metanano/validators/*.py
 """
 
+import os
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal, Optional, Tuple
 
@@ -638,6 +640,35 @@ class SearchConfig(BaseModel):
         return self
 
 
+class Aggrescan3DConfig(BaseModel):
+    """Whole-VHH static aggregation filter; see docs/usage/aggrescan3d-rust.md."""
+
+    enabled: bool = Field(
+        default_factory=lambda: os.getenv("AGGRESCAN3D_ENABLED", "true"),
+        validate_default=True,
+        description="Require both A3D caps using the existing TNP model.",
+    )
+    executable: str = Field(
+        default_factory=lambda: os.getenv("AGGRESCAN3D_EXECUTABLE", "aggrescan3d-rs"),
+        min_length=1,
+    )
+    freesasa_executable: str = Field(
+        default_factory=lambda: os.getenv("FREESASA_EXECUTABLE", "freesasa"),
+        min_length=1,
+    )
+    max_average: Decimal = Field(
+        default=Decimal("-0.68002724866200"),
+        allow_inf_nan=False,
+        description="Inclusive upper limit for the whole-VHH mean score.",
+    )
+    max_peak: Decimal = Field(
+        default=Decimal("1.58023066762925"),
+        ge=0,
+        allow_inf_nan=False,
+        description="Inclusive upper limit for the whole-VHH maximum residue score.",
+    )
+
+
 class DevelopabilityConfig(BaseModel):
     """
     Developability filter configuration (Red Region - July 2025).
@@ -652,6 +683,7 @@ class DevelopabilityConfig(BaseModel):
         - metanano/validators/developability_validator.py
     """
 
+    aggrescan3d: Aggrescan3DConfig = Field(default_factory=Aggrescan3DConfig)
     total_cdr_length: RangeThreshold = Field(
         default_factory=lambda: RangeThreshold(min=20, max=39),
         description="Total CDR length valid range [20, 39]. REJECT if L < 20 OR L > 39. / "

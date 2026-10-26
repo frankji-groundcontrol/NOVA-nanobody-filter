@@ -57,9 +57,7 @@ def create_app() -> FastAPI:
         description=(
             "NOVA Nanobody Challenge Submission Filter System. "
             "Validates nanobody sequences through Diversity, Nativeness, "
-            "and Developability filters. / "
-            "NOVA 纳米抗体挑战赛提交过滤系统。"
-            "通过多样性、天然性和可开发性过滤器验证纳米抗体序列。"
+            "and Developability filters. Developability includes TNP and Aggrescan3D."
         ),
         version=__version__,
         docs_url="/docs",

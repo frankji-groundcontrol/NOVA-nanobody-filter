@@ -19,6 +19,7 @@ from metanano.utils.kmer import generate_kmers, build_kmer_index
 from metanano.utils.similarity import compute_kmer_similarity, weighted_minhash
 from metanano.utils.mmseqs2_wrapper import MMseqs2Wrapper
 from metanano.utils.tnp_wrapper import TNPWrapper, TNPResult
+from metanano.utils.aggrescan3d_wrapper import Aggrescan3DWrapper
 
 __all__ = [
     "extract_cdrs",
@@ -30,6 +31,7 @@ __all__ = [
     "MMseqs2Wrapper",
     "TNPWrapper",
     "TNPResult",
+    "Aggrescan3DWrapper",
 ]
 
 

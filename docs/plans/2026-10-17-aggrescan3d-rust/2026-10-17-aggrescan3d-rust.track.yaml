@@ -1,0 +1,51 @@
+version: 2
+task: "Integrate Aggrescan3D Developability gates and repair TNP profile handling"
+coordinator: codex
+history_file: 2026-10-17-aggrescan3d-rust.track.history.jsonl
+plan:
+  - step: Establish the native integration acceptance check
+    owner: codex
+    status: completed
+  - step: Integrate the Rust scorer and propagate results
+    owner: codex
+    status: completed
+  - step: Verify the native path and close documentation
+    owner: codex
+    status: completed
+  - step: Add reusable VHH metric helpers and document whole-chain and regional review
+    owner: codex
+    status: completed
+  - step: Integrate the registered A3D subfilter and both caps within Developability
+    owner: codex
+    status: completed
+  - step: Verify rejection, boundary precision, failure handling and documentation
+    owner: codex
+    status: completed
+  - step: Review and integrate the compatible TNP diagnostics from PR 3
+    owner: codex
+    status: completed
+  - step: Repair reproducible TNP wrapper and service integration failures
+    owner: codex
+    status: completed
+  - step: Verify the combined TNP and A3D change
+    owner: codex
+    status: completed
+  - step: Publish the verified change as a pull request
+    owner: codex
+    status: completed
+  - step: Harden the shared deadline and cancellation cleanup in PR 4
+    owner: codex
+    status: completed
+  - step: Verify predictor-backed TNP and deadline cleanup on an authorized GPU host
+    owner: codex
+    status: completed
+  - step: Identify runtime bottlenecks and verify the actual OpenMM refinement platform
+    owner: codex
+    status: completed
+main:
+  outcome: "Developability requires TNP criteria and both whole-VHH A3D caps; actual GPU prediction, shared deadlines and cancellation cleanup are verified"
+  owner: codex
+  status: completed
+  pull_request: "https://github.com/frankji-groundcontrol/NOVA-nanobody-filter/pull/4"
+  next_evidence: "Review PR 4 and provision the verified dependencies and weights; the checkpoint uses CUDA prediction and one-thread CPU OpenMM refinement. CUDA refinement speed/score agreement, deployed HTTP, real earlier filters and production concurrency remain unverified"
+side_tracks: []

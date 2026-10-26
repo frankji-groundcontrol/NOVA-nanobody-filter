@@ -47,10 +47,9 @@ class ValidationPipeline:
     编排纳米抗体序列的验证流水线。
 
     The pipeline runs three filters in sequence:
-    流水线按顺序运行三个过滤器：
         1. Diversity Filter - Ensures sequence uniqueness / 多样性过滤器 - 确保序列唯一性
         2. Nativeness Filter - Validates nanobody structure / 天然性过滤器 - 验证纳米抗体结构
-        3. Developability Filter - Checks therapeutic viability / 可开发性过滤器 - 检查治疗可行性
+        3. Developability Filter - Checks TNP criteria and Aggrescan3D mean/peak caps
 
     Early termination occurs if any filter fails.
     如果任何过滤器失败，则提前终止。
